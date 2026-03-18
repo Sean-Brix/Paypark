@@ -1,0 +1,34 @@
+[
+  {
+    "id": "EXP-001",
+    "label": "Paper Print Roll",
+    "amount": 150.00,
+    "date": "2026-02-08",
+    "category": "Hardware",
+    "description": "Thermal receipt paper roll replacement"
+  },
+  {
+    "id": "EXP-002",
+    "label": "Hosting / Server",
+    "amount": 300.00,
+    "date": "2026-02-01",
+    "category": "Digital",
+    "description": "Monthly Express server hosting fee"
+  },
+  {
+    "id": "EXP-003",
+    "label": "Kiosk Maintenance",
+    "amount": 200.00,
+    "date": "2026-01-25",
+    "category": "Hardware",
+    "description": "Monthly hardware inspection and cleaning"
+  },
+  {
+    "id": "EXP-004",
+    "label": "Coin Acceptor Service",
+    "amount": 500.00,
+    "date": "2026-01-15",
+    "category": "Hardware",
+    "description": "Coin mechanism recalibration"
+  }
+]

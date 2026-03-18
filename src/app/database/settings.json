@@ -1,0 +1,15 @@
+{
+  "kioskId": "KIOSK-001",
+  "kioskName": "Main Entrance Kiosk",
+  "location": "Level 1 South",
+  "carPrice": 20,
+  "motorcyclePrice": 10,
+  "ebikePrice": 5,
+  "operatingHours": {
+    "open": "06:00",
+    "close": "22:00"
+  },
+  "receiptHeader": "CVSU-CCAT PAY-PARK",
+  "receiptFooter": "Please keep this for reference",
+  "systemVersion": "1.0.0"
+}

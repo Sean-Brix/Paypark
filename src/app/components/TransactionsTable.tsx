@@ -1,6 +1,6 @@
 import React from "react";
 import { Search, Filter, Download, MoreHorizontal, ArrowUpRight, ChevronLeft, ChevronRight } from "lucide-react";
-import { useDatabase } from "../database/DatabaseContext";
+import { useDatabase } from "../context/DatabaseContext";
 
 export function TransactionsTable() {
   const db = useDatabase();

@@ -1,7 +1,7 @@
 import React from "react";
 import { Save, User, MapPin, Monitor, CreditCard } from "lucide-react";
 import { toast } from "sonner";
-import { useDatabase } from "../database/DatabaseContext";
+import { useDatabase } from "../context/DatabaseContext";
 
 export function AdminSettings() {
   const db = useDatabase();

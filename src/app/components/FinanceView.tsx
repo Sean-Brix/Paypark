@@ -1,6 +1,6 @@
 import React from "react";
 import { Plus, Wallet, FileText, PieChart, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
-import { useDatabase } from "../database/DatabaseContext";
+import { useDatabase } from "../context/DatabaseContext";
 
 export function FinanceView() {
   const db = useDatabase();

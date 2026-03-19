@@ -4,7 +4,7 @@ import { Settings } from "lucide-react";
 import { KioskView } from "./components/KioskView";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { AdminLogin } from "./components/AdminLogin";
-import { DatabaseProvider, useDatabase } from "./database/DatabaseContext";
+import { DatabaseProvider, useDatabase } from "./context/DatabaseContext";
 
 function AppContent() {
   const [view, setView] = useState<"kiosk" | "admin" | "login">("kiosk");
@@ -42,12 +42,8 @@ function AppContent() {
       document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
     }
 
-    // Clear storage
-    localStorage.clear();
-    sessionStorage.clear();
-    
     setView("kiosk");
-    toast.info("Session cleared. Returned to Kiosk mode.");
+    toast.info("Returned to Kiosk mode.");
   };
 
   return (

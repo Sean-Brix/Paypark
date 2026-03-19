@@ -14,8 +14,8 @@ import { DashboardHome } from "./DashboardHome";
 import { TransactionsTable } from "./TransactionsTable";
 import { FinanceView } from "./FinanceView";
 import { AdminSettings } from "./AdminSettings";
-import logoImage from 'figma:asset/f9b2dd1f8f807fb04d6f9f5feed8a994eb1778c7.png';
-import { useDatabase } from "../database/DatabaseContext";
+import logoImage from "../../assets/logo.png";
+import { useDatabase } from "../context/DatabaseContext";
 
 interface AdminDashboardProps {
   onLogout: () => void;

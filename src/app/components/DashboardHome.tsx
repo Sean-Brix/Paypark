@@ -16,7 +16,7 @@ import {
   Clock, ParkingCircle, Coins, ChevronDown,
   Sun, Sunrise, Sunset
 } from "lucide-react";
-import { useDatabase } from "../database/DatabaseContext";
+import { useDatabase } from "../context/DatabaseContext";
 
 type TimeFilter = "hourly" | "daily" | "weekly" | "monthly";
 

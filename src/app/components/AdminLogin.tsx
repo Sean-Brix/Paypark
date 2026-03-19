@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { motion } from "motion/react";
 import { Lock, User, X, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
-import logoImage from 'figma:asset/f9b2dd1f8f807fb04d6f9f5feed8a994eb1778c7.png';
-import schoolLogo from 'figma:asset/f9b2dd1f8f807fb04d6f9f5feed8a994eb1778c7.png';
-import { useDatabase } from "../database/DatabaseContext";
+import logoImage from "../../assets/logo.png";
+import schoolLogo from "../../assets/logo.png";
+import { useDatabase } from "../context/DatabaseContext";
 
 interface AdminLoginProps {
   onCancel: () => void;

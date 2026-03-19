@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Car, Bike, Zap, ArrowLeft, Printer, CheckCircle2, Coins, Pointer } from "lucide-react";
 import { toast } from "sonner";
-import schoolLogo from 'figma:asset/f9b2dd1f8f807fb04d6f9f5feed8a994eb1778c7.png';
-import { useDatabase, type Transaction } from "../database/DatabaseContext";
+import schoolLogo from "../../assets/logo.png";
+import { useDatabase, type Transaction } from "../context/DatabaseContext";
+import { apiClient } from "../api/client";
 
 const iconMap: Record<string, React.ElementType> = { Car, Bike, Zap };
 
@@ -15,6 +16,8 @@ export function KioskView() {
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [price, setPrice] = useState(0);
   const [lastTransaction, setLastTransaction] = useState<Transaction | null>(null);
+  const [paymentStartedAt, setPaymentStartedAt] = useState<number | null>(null);
+  const [insertedAmount, setInsertedAmount] = useState(0);
 
   const [themeIndex, setThemeIndex] = useState(0);
 
@@ -41,40 +44,117 @@ export function KioskView() {
 
   const startSession = () => setState("selecting");
   
-  const selectVehicle = (type: string, amount: number) => {
-    setSelectedVehicle(type);
-    setPrice(amount);
-    setState("paying");
+  const selectVehicle = async (type: string, amount: number) => {
+    try {
+      const payment = await apiClient.sendPaymentWebhook({
+        kioskId: "KIOSK-001",
+        vehicleType: type,
+        targetAmount: amount,
+      });
+
+      setSelectedVehicle(type);
+      setPrice(amount);
+      setLastTransaction(null);
+      setPaymentStartedAt(Date.now());
+      setInsertedAmount(Number(payment.totalInserted || 0));
+      setState("paying");
+    } catch {
+      toast.error("Unable to start payment session. Please try again.");
+    }
   };
 
-  const handlePayment = () => {
-    setTimeout(() => {
+  useEffect(() => {
+    if (state !== "paying") {
+      return;
+    }
+
+    let isCancelled = false;
+    const startedAt = paymentStartedAt ?? Date.now();
+    const timeoutMs = 120000;
+    const pollIntervalMs = 1500;
+    const timeoutAt = startedAt + timeoutMs;
+
+    const finalizeSuccess = (tx: Transaction) => {
+      setLastTransaction(tx);
       setState("printing");
-      const newTx = db.addTransaction(selectedVehicle || "Unknown", price);
-      setLastTransaction(newTx);
-      
+
       setTimeout(() => {
         setState("thankyou");
-        
+
         setTimeout(() => {
           setState("idle");
           setSelectedVehicle(null);
           setLastTransaction(null);
+          setPaymentStartedAt(null);
+          setInsertedAmount(0);
         }, 5000);
       }, 7000);
-    }, 3000);
-  };
+    };
 
-  const paymentTriggered = useRef(false);
-  useEffect(() => {
-    if (state === "paying" && !paymentTriggered.current) {
-      paymentTriggered.current = true;
-      handlePayment();
-    }
-    if (state !== "paying") {
-      paymentTriggered.current = false;
-    }
-  }, [state]);
+    const pollForWebhookPayment = async () => {
+      if (isCancelled || Date.now() >= timeoutAt) {
+        if (!isCancelled) {
+          toast.error("Payment timeout. No webhook signal received.");
+          setState("selecting");
+        }
+        return;
+      }
+
+      try {
+        const result = await apiClient.getTransactions(1, 20, {
+          type: selectedVehicle || undefined,
+          dateFrom: new Date(startedAt - 2000).toISOString(),
+        });
+
+        const current = result.transactions.find((tx) => {
+          const txTime = new Date(tx.timestamp).getTime();
+          return txTime >= startedAt - 2000;
+        });
+
+        if (current) {
+          const total = Number(current.amount || 0);
+          setInsertedAmount(total);
+
+          const isPaid = current.status === "Success" || total >= price;
+          if (isPaid) {
+            finalizeSuccess(current);
+            return;
+          }
+        } else {
+          setInsertedAmount(0);
+        }
+
+        if (insertedAmount >= price) {
+          const fallbackTx: Transaction = {
+            id: crypto.randomUUID(),
+            kioskId: "KIOSK-001",
+            type: selectedVehicle || "Unknown",
+            amount: insertedAmount,
+            status: "Success",
+            controlNumber: "ESP-PAYMENT",
+            timestamp: new Date().toISOString(),
+            notes: "",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+          finalizeSuccess(fallbackTx);
+          return;
+        }
+      } catch {
+        // Keep polling through temporary network errors.
+      }
+
+      if (!isCancelled) {
+        setTimeout(pollForWebhookPayment, pollIntervalMs);
+      }
+    };
+
+    pollForWebhookPayment();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [state, selectedVehicle, price, paymentStartedAt, insertedAmount]);
 
   const enabledVehicles = db.vehicles.filter(v => v.enabled);
 
@@ -362,6 +442,12 @@ export function KioskView() {
             <div className="font-black text-[#1E7F5C]" style={{ fontSize: "clamp(2.5rem, 8vmin, 5.5rem)" }}>
               &#8369;{price.toFixed(2)}
             </div>
+            <div className="mt-[1.5vmin] text-slate-600 font-bold" style={{ fontSize: "clamp(0.85rem, 1.8vmin, 1.1rem)" }}>
+              Inserted: <span className="text-[#1E7F5C]">&#8369;{insertedAmount.toFixed(2)}</span>
+            </div>
+            <div className="mt-[0.5vmin] text-slate-500" style={{ fontSize: "clamp(0.75rem, 1.4vmin, 0.95rem)" }}>
+              Remaining: &#8369;{Math.max(0, price - insertedAmount).toFixed(2)}
+            </div>
             <p className="mt-[4vmin] text-slate-400 italic" style={{ fontSize: "clamp(0.7rem, 1.3vmin, 0.9rem)" }}>
               Do not leave until receipt is printed.
             </p>
@@ -426,7 +512,7 @@ export function KioskView() {
                       className="font-black tracking-tight text-slate-900"
                       style={{ fontSize: "clamp(0.875rem, 1.8vmin, 1.25rem)" }}
                     >
-                      {db.settings.receiptHeader || "PAY-PARK"}
+                        {db.settings?.receiptHeader || "PAY-PARK"}
                     </h3>
                   </div>
                   <div className="border-b-2 border-dashed border-slate-200 w-full my-[0.5vmin]" />
@@ -461,7 +547,7 @@ export function KioskView() {
                   >
                     THANK YOU
                   </p>
-                  <p className="text-slate-400 mt-[0.25vmin]" style={{ fontSize: "clamp(0.4rem, 0.7vmin, 0.5rem)" }}>{db.settings.receiptFooter}</p>
+                  <p className="text-slate-400 mt-[0.25vmin]" style={{ fontSize: "clamp(0.4rem, 0.7vmin, 0.5rem)" }}>{db.settings?.receiptFooter || "Drive safely"}</p>
                 </div>
               </motion.div>
             </div>

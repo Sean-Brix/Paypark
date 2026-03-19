@@ -341,6 +341,21 @@ async function startArduinoListener() {
 
 // ─── EXPRESS SERVER ────────────────────────────────────────
 const app = express();
+
+// Allow hosted PWA origin to call local kiosk service without browser CORS blocks.
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  return next();
+});
+
 app.use(express.json());
 
 app.post("/print/receipt", handlePrint);

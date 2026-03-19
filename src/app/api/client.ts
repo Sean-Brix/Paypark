@@ -179,6 +179,45 @@ class ApiClient {
       body: JSON.stringify(payload),
     });
   }
+
+  // ────── Printing ──────────────────────────────────────
+
+  async printReceipt(payload: {
+    vehicleType: string;
+    amount: number;
+    controlNumber: string;
+    timestamp: string;
+    receiptHeader?: string;
+    receiptFooter?: string;
+  }): Promise<{ success: boolean; message: string }> {
+    // Print requests go to local kiosk service (localhost:3333)
+    // This allows the PWA (hosted anywhere) to print on the local machine
+    const printServiceUrl = "http://localhost:3333";
+    
+    try {
+      const response = await fetch(`${printServiceUrl}/print/receipt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({
+          message: `HTTP ${response.status}`,
+        }));
+        throw new Error(error.message || `Print request failed: ${response.statusCode}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      // If local service unavailable, fallback to backend (if available)
+      console.warn(`Local print service unavailable: ${error.message}`);
+      return this.request("/print/receipt", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
+  }
 }
 
 export const apiClient = new ApiClient();

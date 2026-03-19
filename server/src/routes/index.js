@@ -6,6 +6,7 @@ import { vehiclesRouter } from "./vehicles.routes.js";
 import { transactionsRouter } from "./transactions.routes.js";
 import { expensesRouter } from "./expenses.routes.js";
 import { paymentsRouter } from "./payments.routes.js";
+import { printRouter } from "./print.routes.js";
 
 export const router = Router();
 
@@ -16,3 +17,4 @@ router.use("/vehicles", vehiclesRouter);
 router.use("/transactions", transactionsRouter);
 router.use("/expenses", expensesRouter);
 router.use("/payments", paymentsRouter);
+router.use("/print", printRouter);

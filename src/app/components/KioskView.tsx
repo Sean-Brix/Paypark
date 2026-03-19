@@ -156,6 +156,31 @@ export function KioskView() {
     };
   }, [state, selectedVehicle, price, paymentStartedAt, insertedAmount]);
 
+  // ─── PRINT RECEIPT WHEN PAYMENT SUCCEEDS ──────────────────
+  useEffect(() => {
+    if (state !== "printing" || !lastTransaction) {
+      return;
+    }
+
+    const printReceipt = async () => {
+      try {
+        await apiClient.printReceipt({
+          vehicleType: lastTransaction.type,
+          amount: Number(lastTransaction.amount || 0),
+          controlNumber: lastTransaction.controlNumber,
+          timestamp: lastTransaction.timestamp,
+          receiptHeader: db.settings?.receiptHeader,
+          receiptFooter: db.settings?.receiptFooter,
+        });
+      } catch (error) {
+        console.warn("Print failed:", error);
+        toast.error("Receipt printing failed, but payment is complete");
+      }
+    };
+
+    printReceipt();
+  }, [state, lastTransaction, db.settings?.receiptHeader, db.settings?.receiptFooter]);
+
   const enabledVehicles = db.vehicles.filter(v => v.enabled);
 
   const getPriceForVehicle = (priceKey: string): number => {

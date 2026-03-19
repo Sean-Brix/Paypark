@@ -25,4 +25,14 @@ export default defineConfig({
     outDir: './server/public',
     emptyOutDir: true,
   },
+
+  // In dev, proxy same-origin /api calls to the backend server.
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+    },
+  },
 })

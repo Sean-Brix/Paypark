@@ -7,14 +7,16 @@ import { transactionsRouter } from "./transactions.routes.js";
 import { expensesRouter } from "./expenses.routes.js";
 import { paymentsRouter } from "./payments.routes.js";
 import { printRouter } from "./print.routes.js";
+import { requireDatabase } from "../middleware/requireDatabase.js";
 
 export const router = Router();
 
 router.use("/health", healthRouter);
-router.use("/auth", authRouter);
-router.use("/settings", settingsRouter);
-router.use("/vehicles", vehiclesRouter);
-router.use("/transactions", transactionsRouter);
-router.use("/expenses", expensesRouter);
-router.use("/payments", paymentsRouter);
+
+router.use("/auth", requireDatabase, authRouter);
+router.use("/settings", requireDatabase, settingsRouter);
+router.use("/vehicles", requireDatabase, vehiclesRouter);
+router.use("/transactions", requireDatabase, transactionsRouter);
+router.use("/expenses", requireDatabase, expensesRouter);
+router.use("/payments", requireDatabase, paymentsRouter);
 router.use("/print", printRouter);

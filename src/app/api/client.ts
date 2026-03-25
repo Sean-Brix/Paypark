@@ -15,9 +15,6 @@ const API_BASE_URL = (import.meta.env.VITE_API_URL || "/api").trim();
 class ApiClient {
   private baseUrl = API_BASE_URL;
 
-  /**
-   * Generic fetch wrapper with error handling
-   */
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -42,16 +39,12 @@ class ApiClient {
     return data.data || data;
   }
 
-  // ────── Auth ──────────────────────────────────────────
-
   async login(username: string, password: string): Promise<Admin> {
     return this.request<Admin>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
   }
-
-  // ────── Settings ──────────────────────────────────────
 
   async getSettings(kioskId: string = "KIOSK-001"): Promise<Settings> {
     return this.request<Settings>(`/settings?kioskId=${kioskId}`);
@@ -61,26 +54,25 @@ class ApiClient {
     kioskId: string,
     updates: Partial<Settings>
   ): Promise<Settings> {
-    return this.request<Settings>(`/settings`, {
+    return this.request<Settings>("/settings", {
       method: "PATCH",
       body: JSON.stringify({ kioskId, ...updates }),
     });
   }
 
-  // ────── Vehicles ──────────────────────────────────────
-
   async getVehicles(): Promise<Vehicle[]> {
     return this.request<Vehicle[]>("/vehicles");
   }
 
-  async updateVehicle(vehicleId: string, updates: Partial<Vehicle>): Promise<Vehicle> {
+  async updateVehicle(
+    vehicleId: string,
+    updates: Partial<Vehicle>
+  ): Promise<Vehicle> {
     return this.request<Vehicle>(`/vehicles/${vehicleId}`, {
       method: "PATCH",
       body: JSON.stringify(updates),
     });
   }
-
-  // ────── Transactions ──────────────────────────────────
 
   async getTransactions(
     page: number = 1,
@@ -118,8 +110,6 @@ class ApiClient {
     });
   }
 
-  // ────── Expenses ──────────────────────────────────────
-
   async getExpenses(
     page: number = 1,
     limit: number = 20,
@@ -155,7 +145,47 @@ class ApiClient {
     });
   }
 
-  // ────── Payments (Single Webhook Endpoint) ─────────────
+  async startPaymentSession(payload: {
+    kioskId?: string;
+    type?: string;
+    vehicleType?: string;
+    targetAmount: number;
+  }): Promise<{
+    status: "Pending" | "Success";
+    totalInserted: number;
+    targetAmount: number | null;
+    remaining: number | null;
+    transaction: Transaction | null;
+    controlNumber: string;
+    kioskId: string;
+  }> {
+    return this.request("/payments/session", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getPaymentStatus(
+    controlNumber: string,
+    kioskId: string = "KIOSK-001"
+  ): Promise<{
+    status: "Pending" | "Success";
+    totalInserted: number;
+    targetAmount: number | null;
+    remaining: number | null;
+    transaction: Partial<Transaction> | null;
+    controlNumber: string | null;
+    kioskId: string;
+  }> {
+    const params = new URLSearchParams({
+      kioskId,
+      controlNumber,
+    });
+
+    return this.request(`/payments/status?${params.toString()}`, {
+      method: "GET",
+    });
+  }
 
   async sendPaymentWebhook(payload: {
     kioskId?: string;
@@ -180,8 +210,6 @@ class ApiClient {
     });
   }
 
-  // ────── Printing ──────────────────────────────────────
-
   async printReceipt(payload: {
     vehicleType: string;
     amount: number;
@@ -190,10 +218,8 @@ class ApiClient {
     receiptHeader?: string;
     receiptFooter?: string;
   }): Promise<{ success: boolean; message: string }> {
-    // Print requests go to local kiosk service (localhost:3333)
-    // This allows the PWA (hosted anywhere) to print on the local machine
     const printServiceUrl = "http://localhost:3333";
-    
+
     try {
       const response = await fetch(`${printServiceUrl}/print/receipt`, {
         method: "POST",
@@ -210,7 +236,6 @@ class ApiClient {
 
       return await response.json();
     } catch (error) {
-      // If local service unavailable, fallback to backend (if available)
       console.warn(`Local print service unavailable: ${error.message}`);
       return this.request("/print/receipt", {
         method: "POST",

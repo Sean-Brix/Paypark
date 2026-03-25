@@ -1,143 +1,73 @@
-# PAYPARK Kiosk Service
+# PAYPARK Local Printer Service
 
-Standalone Windows service for the kiosk machine. Handles:
-- **Arduino Coin Selector**: Listens to serial port and reports coins to the backend
-- **Thermal Receipt Printing**: Prints receipts to POS-58 printer immediately after payment
+This local Windows service is now printer-only.
 
-## Quick Start (No Setup Required)
+It handles:
+- Receipt printing over `http://localhost:3333/print/receipt`
+- Basic health checks over `http://localhost:3333/health`
 
-### Install & Run
+It no longer:
+- Connects to MQTT
+- Reads Arduino or ESP32 coin input
+- Sends payment data to the backend
 
-1. Install Node.js (https://nodejs.org/) if not already installed
-2. Run these commands:
-   ```bash
-   cd serialPort
-   npm install
-   npm start
-   ```
-3. Service listens on `http://localhost:3333`
+The payment device now talks to the online MQTT broker, and the backend server is the only part of the system that connects to MQTT.
 
-### Easier: Use the .bat File
+## Quick Start
 
-After `npm install`, just double-click `RUN-SERVICE.bat`:
-- Automatically sets up environment variables
-- Shows service status
-- Press Ctrl+C to stop
+1. Open a terminal in `serialPort`
+2. Run `npm install`
+3. Run `npm start`
 
-### Auto-Start with Windows
-
-**Option 1: Startup Folder (Simple)**
-1. Press `Win + R`, type `shell:startup`
-2. Copy `paypark-kiosk-service.exe` shortcut here
-3. Service auto-starts on login
-
-**Option 2: Task Scheduler (Advanced)**
-1. Open Task Scheduler
-2. Create Basic Task → "PAYPARK Kiosk Service"
-3. Trigger: "At startup"
-4. Action: Start program → `paypark-kiosk-service.exe`
-5. Check "Run whether user is logged in or not"
+Or double-click `RUN-SERVICE.bat`.
 
 ## Configuration
 
-Set environment variables before running:
+Supported environment variables:
 
-```bash
-# COM port for Arduino (default: COM7)
-set PAYPARK_COM_PORT=COM3
-
-# Printer name (default: POS-58)
+```bat
 set PAYPARK_PRINTER_NAME=POS-58
-
-# Service port (default: 3333)
 set PAYPARK_SERVICE_PORT=3333
-
-# Backend webhook URL (default: Render.com)
-set PAYPARK_WEBHOOK_URL=https://your-backend.com/api/payments/webhook
-
-# Logo path (optional, for printer)
 set PAYPARK_LOGO_PATH=C:\path\to\logo.png
-
-paypark-kiosk-service.exe
+set PAYPARK_LOGO_MAX_DOTS=215
+set PAYPARK_LOGO_MAX_HEIGHT=92
+set PAYPARK_LOGO_THRESHOLD=168
+set PAYPARK_COLUMNS=32
+set PAYPARK_DOTS=384
 ```
 
-Or create a `.bat` wrapper:
+## API
 
-```batch
-@echo off
-set PAYPARK_COM_PORT=COM3
-set PAYPARK_PRINTER_NAME=POS-58
-set PAYPARK_SERVICE_PORT=3333
-paypark-kiosk-service.exe
-pause
+### `GET /health`
+
+Example response:
+
+```json
+{
+  "status": "ok",
+  "service": "paypark-kiosk-printer",
+  "port": 3333,
+  "printer": "POS-58"
+}
 ```
 
-## API Endpoints
+### `POST /print/receipt`
 
-### Health Check
-```
-GET http://localhost:3333/health
-Response: { "status": "ok", "service": "paypark-kiosk", "port": 3333 }
-```
+Example request:
 
-### Print Receipt
-```
-POST http://localhost:3333/print/receipt
-Content-Type: application/json
-
-Body:
+```json
 {
   "vehicleType": "Car",
-  "amount": 50.00,
-  "controlNumber": "CTRL-12345",
-  "timestamp": "2026-03-19T10:30:00Z",
+  "amount": 50,
+  "controlNumber": "ESP-ACTIVE-1711362000000-321",
+  "timestamp": "2026-03-25T09:00:05.000Z",
   "receiptHeader": "Thank you for parking!",
-  "receiptFooter": "Drive safely"
+  "receiptFooter": "Drive safe."
 }
-
-Response: { "success": true, "message": "..." }
 ```
 
-## Troubleshooting
+## Notes
 
-### Arduino Not Detected
-- Check COM port: Device Manager → Ports (COM & LPT)
-- Verify Arduino is connected to USB
-- Update PAYPARK_COM_PORT if needed
-
-### Printer Not Found
-- Check printer name: Settings → Devices → Printers & Scanners
-- Ensure POS-58 is set as default printer
-- Verify USB connection
-
-### Service Won't Start
-- Check Windows Firewall (allow port 3333)
-- Ensure no other service uses port 3333
-- Run as Administrator if permission denied
-
-### Logo Missing
-- Ensure logo.png exists at specified path
-- Receipt will print without logo if file not found (no error)
-
-## Logs
-
-The service prints all events to console:
-- `[COIN]` - Coins detected from Arduino
-- `[SERIAL]` - Serial port events
-- `[PRINT]` - Receipt printing status
-
-Redirect to file for persistent logs:
-```bash
-paypark-kiosk-service.exe > kiosk-service.log 2>&1
-```
-
-## PWA Integration
-
-The hosted PWA calls this service at `http://localhost:3333/print/receipt` automatically after payment completes. No manual configuration needed if the PWA points to your hosted backend.
-
-## Support
-
-Issues or questions? Check:
-1. Port 3333 is accessible: `curl http://localhost:3333/health`
-2. Arduino serial connection: `Get-Content COM7 -Wait` (PowerShell)
-3. Printer queue: Settings → Devices → Printers & Scanners
+- The browser still tries the local printer service first for receipt printing.
+- If the local service is unavailable, the frontend falls back to the backend print endpoint.
+- If MQTT shows `Not authorized`, check the backend server configuration, not this local printer service.

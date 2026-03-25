@@ -230,3 +230,36 @@ export function validatePaymentWebhook(req, res, next) {
 
   return next();
 }
+
+export function validatePaymentSessionStart(req, res, next) {
+  const payload = req.body || {};
+
+  if (payload.targetAmount === undefined) {
+    throw toHttpError("targetAmount is required for payment initialization", 422);
+  }
+
+  assertNumberField(payload, "targetAmount", { min: 0.01 });
+
+  const hasType = typeof payload.type === "string" && payload.type.trim().length > 0;
+  const hasVehicleType =
+    typeof payload.vehicleType === "string" &&
+    payload.vehicleType.trim().length > 0;
+
+  if (!hasType && !hasVehicleType) {
+    throw toHttpError("vehicleType (or type) is required for payment initialization", 422);
+  }
+
+  if (payload.kioskId !== undefined && typeof payload.kioskId !== "string") {
+    throw toHttpError("kioskId must be a string", 422);
+  }
+
+  if (payload.type !== undefined && typeof payload.type !== "string") {
+    throw toHttpError("type must be a string", 422);
+  }
+
+  if (payload.vehicleType !== undefined && typeof payload.vehicleType !== "string") {
+    throw toHttpError("vehicleType must be a string", 422);
+  }
+
+  return next();
+}

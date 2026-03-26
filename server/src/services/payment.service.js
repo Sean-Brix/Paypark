@@ -1,5 +1,6 @@
 import { prisma } from "../config/prisma.js";
 import { toHttpError } from "../utils/api.js";
+import { generateControlNumber } from "../utils/controlNumber.js";
 
 const DEFAULT_KIOSK_ID = "KIOSK-001";
 const DEFAULT_TYPE = "Unknown";
@@ -111,10 +112,6 @@ async function safePublishOpen(payload) {
   }
 }
 
-function buildControlNumber(prefix = "ESP") {
-  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-}
-
 function buildPaymentSession({
   controlNumber,
   targetAmount,
@@ -166,8 +163,16 @@ export async function initializePaymentSession(payload = {}) {
     );
   }
 
+  const controlNumber = await generateControlNumber({
+    prisma,
+    date: new Date(),
+    activeControlNumbers: Array.from(activePayments.values()).map(
+      (payment) => payment.controlNumber
+    ),
+  });
+
   const payment = buildPaymentSession({
-    controlNumber: buildControlNumber("ESP-ACTIVE"),
+    controlNumber,
     targetAmount,
     type: vehicleType.trim(),
   });

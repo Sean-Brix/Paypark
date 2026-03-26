@@ -1,5 +1,6 @@
 import { prisma } from "../config/prisma.js";
 import { sendSuccess, toHttpError } from "../utils/api.js";
+import { generateControlNumber } from "../utils/controlNumber.js";
 
 const DEFAULT_KIOSK_ID = "KIOSK-001";
 const DEFAULT_STATUS = "Success";
@@ -26,10 +27,6 @@ function toTransactionDto(row) {
     kioskId: row.kioskId,
     controlNumber: row.controlNumber,
   };
-}
-
-function buildControlNumber() {
-  return `CTRL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
 
 export async function listTransactions(req, res) {
@@ -77,6 +74,13 @@ export async function listTransactions(req, res) {
 
 export async function createTransaction(req, res) {
   const payload = req.body || {};
+  const transactionDate = payload.timestamp ? new Date(payload.timestamp) : new Date();
+  const controlNumber =
+    payload.controlNumber ||
+    (await generateControlNumber({
+      prisma,
+      date: transactionDate,
+    }));
 
   try {
     const created = await prisma.transaction.create({
@@ -84,10 +88,10 @@ export async function createTransaction(req, res) {
         id: payload.id || crypto.randomUUID(),
         type: payload.type || DEFAULT_TYPE,
         amount: payload.amount,
-        timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
+        timestamp: transactionDate,
         status: payload.status || DEFAULT_STATUS,
         kioskId: payload.kioskId || DEFAULT_KIOSK_ID,
-        controlNumber: payload.controlNumber || buildControlNumber(),
+        controlNumber,
       },
     });
 

@@ -1,43 +1,33 @@
 import express from "express";
 import { execFile } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import sharp from "sharp";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { join } from "node:path";
 
 const PORT = Number.parseInt(process.env.PAYPARK_SERVICE_PORT || "3333", 10);
 const PRINTER_NAME = process.env.PAYPARK_PRINTER_NAME || "POS-58";
-const PRINTER_DOTS = Number.parseInt(process.env.PAYPARK_DOTS || "384", 10);
 const RECEIPT_CHARS = Number.parseInt(process.env.PAYPARK_COLUMNS || "32", 10);
-const LOGO_MAX_DOTS = Number.parseInt(
-  process.env.PAYPARK_LOGO_MAX_DOTS || String(Math.floor(PRINTER_DOTS * 0.56)),
-  10
-);
-const LOGO_MAX_HEIGHT = Number.parseInt(
-  process.env.PAYPARK_LOGO_MAX_HEIGHT || "92",
-  10
-);
-const LOGO_THRESHOLD = Number.parseInt(
-  process.env.PAYPARK_LOGO_THRESHOLD || "168",
-  10
-);
-const LOGO_PATH =
-  process.env.PAYPARK_LOGO_PATH ||
-  join(__dirname, "..", "src", "assets", "logo.png");
+const DEFAULT_RECEIPT_TITLE = "CVSU-CCAT PAY-PARKING";
+const DEFAULT_RECEIPT_FOOTER = "Thank You!";
+const RECEIPT_COPIES = ["GUARD COPY", "DRIVER COPY"];
 
 function fitText(text, width = RECEIPT_CHARS) {
   const value = String(text);
-  if (value.length <= width) return value;
-  if (width <= 1) return value.slice(0, width);
+
+  if (value.length <= width) {
+    return value;
+  }
+
+  if (width <= 1) {
+    return value.slice(0, width);
+  }
+
   return `${value.slice(0, width - 1)}.`;
 }
 
 function center(text, width = RECEIPT_CHARS) {
   const value = String(text);
+
   if (value.length >= width) {
     return value.slice(0, width);
   }
@@ -51,111 +41,68 @@ function line(left, right, width = RECEIPT_CHARS) {
   const leftText = fitText(left, maxLeft);
   const rightText = fitText(right, Math.max(1, width - leftText.length - 1));
   const spaces = Math.max(1, width - leftText.length - rightText.length);
+
   return `${leftText}${" ".repeat(spaces)}${rightText}`;
 }
 
-async function buildLogoRasterBytes(logoFilePath) {
-  try {
-    const input = readFileSync(logoFilePath);
-    const metadata = await sharp(input).metadata();
+function resolveReceiptTitle(value) {
+  const trimmed = String(value || "").trim();
 
-    if (!metadata.width || !metadata.height) {
-      throw new Error("Could not read logo dimensions");
-    }
-
-    const targetWidth = Math.max(
-      8,
-      Math.min(PRINTER_DOTS, LOGO_MAX_DOTS, metadata.width)
-    );
-
-    const { data, info } = await sharp(input)
-      .resize({
-        width: targetWidth,
-        height: LOGO_MAX_HEIGHT,
-        fit: "inside",
-        withoutEnlargement: true,
-        kernel: sharp.kernel.nearest,
-      })
-      .ensureAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const widthBytes = Math.ceil(PRINTER_DOTS / 8);
-    const rowData = Buffer.alloc(widthBytes * info.height, 0);
-    const xOffset = Math.floor((PRINTER_DOTS - info.width) / 2);
-
-    for (let y = 0; y < info.height; y += 1) {
-      for (let x = 0; x < info.width; x += 1) {
-        const index = (y * info.width + x) * info.channels;
-        const r = data[index];
-        const g = data[index + 1];
-        const b = data[index + 2];
-        const a = data[index + 3] ?? 255;
-        const alpha = a / 255;
-        const luminance =
-          (0.299 * r + 0.587 * g + 0.114 * b) * alpha + 255 * (1 - alpha);
-
-        if (luminance < LOGO_THRESHOLD) {
-          const destinationX = x + xOffset;
-          const byteIndex = y * widthBytes + (destinationX >> 3);
-          const bitMask = 0x80 >> (destinationX & 7);
-          rowData[byteIndex] |= bitMask;
-        }
-      }
-    }
-
-    const xL = widthBytes & 0xff;
-    const xH = (widthBytes >> 8) & 0xff;
-    const yL = info.height & 0xff;
-    const yH = (info.height >> 8) & 0xff;
-
-    return Buffer.concat([
-      Buffer.from([0x1b, 0x61, 0x01]),
-      Buffer.from([0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH]),
-      rowData,
-      Buffer.from([0x0a, 0x1b, 0x61, 0x00]),
-    ]);
-  } catch (error) {
-    console.warn(`Logo generation failed: ${error.message}`);
-    return Buffer.alloc(0);
+  if (!trimmed || /^paypark$/i.test(trimmed)) {
+    return DEFAULT_RECEIPT_TITLE;
   }
+
+  return trimmed.toUpperCase();
 }
 
-async function buildEscPosReceipt(data) {
-  const now = data.timestamp ? new Date(data.timestamp) : new Date();
-  const divider = "-".repeat(RECEIPT_CHARS);
-  const content = [
-    center("PAYPARK"),
-    center("Parking Receipt"),
-    divider,
-    line("Date", now.toLocaleDateString("en-CA")),
-    line("Time", now.toLocaleTimeString("en-GB", { hour12: false })),
-    line("Ticket", data.controlNumber),
-    line("Vehicle", data.vehicleType),
-    line("Amount", `PHP ${Number(data.amount).toFixed(2)}`),
-    line("Status", "PAID"),
-    divider,
-    center(data.receiptHeader || "Thank you for parking!"),
-    center(data.receiptFooter || "Drive safe."),
-    "",
-    "",
-    "",
-  ].join("\n");
+function resolveReceiptFooter(value) {
+  const trimmed = String(value || "").trim();
 
+  if (
+    !trimmed ||
+    /^thank you for parking with us$/i.test(trimmed) ||
+    /^drive safe\.?$/i.test(trimmed) ||
+    /^drive safely\.?$/i.test(trimmed)
+  ) {
+    return DEFAULT_RECEIPT_FOOTER;
+  }
+
+  return trimmed;
+}
+
+function buildReceiptCopyText(data, copyLabel) {
+  const divider = "-".repeat(RECEIPT_CHARS);
+  const amountText = Number(data.amount).toFixed(2);
+
+  return [
+    center(resolveReceiptTitle(data.receiptHeader)),
+    divider,
+    line("AMOUNT:", amountText),
+    "",
+    "CONTROL NUMBER:",
+    center(data.controlNumber),
+    divider,
+    center(copyLabel),
+    center(resolveReceiptFooter(data.receiptFooter)),
+  ].join("\n");
+}
+
+function buildReceiptText(data) {
+  return RECEIPT_COPIES
+    .map((copyLabel) => buildReceiptCopyText(data, copyLabel))
+    .join("\n\n\n");
+}
+
+function buildEscPosReceipt(data) {
+  const content = buildReceiptText(data);
   const init = Buffer.from([0x1b, 0x40]);
   const normal = Buffer.from([0x1b, 0x21, 0x00]);
-  const text = Buffer.from(content, "ascii");
+  const lineSpacing = Buffer.from([0x1b, 0x33, 0x20]);
+  const text = Buffer.from(`${content}\n\n`, "ascii");
   const feed = Buffer.from([0x1b, 0x64, 0x03]);
   const cut = Buffer.from([0x1d, 0x56, 0x00]);
 
-  let logo = Buffer.alloc(0);
-  try {
-    logo = await buildLogoRasterBytes(LOGO_PATH);
-  } catch (error) {
-    console.warn(`Logo skipped: ${error.message}`);
-  }
-
-  return Buffer.concat([init, normal, logo, text, feed, cut]);
+  return Buffer.concat([init, normal, lineSpacing, text, feed, cut]);
 }
 
 function runCommand(command, args) {
@@ -183,7 +130,7 @@ async function handlePrint(req, res) {
       });
     }
 
-    const receiptBuffer = await buildEscPosReceipt({
+    const receiptBuffer = buildEscPosReceipt({
       vehicleType,
       amount,
       controlNumber,

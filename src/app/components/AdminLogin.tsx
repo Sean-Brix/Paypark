@@ -17,27 +17,27 @@ export function AdminLogin({ onCancel, onSuccess }: AdminLoginProps) {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    
-    // Simulate network delay then authenticate against the database
-    setTimeout(() => {
-      const admin = db.authenticateAdmin(username, password);
-      setIsLoading(false);
-      
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const admin = await db.authenticateAdmin(username, password);
+
       if (admin) {
-        db.setCurrentAdmin(admin);
         onSuccess();
       } else {
         toast.error("Invalid credentials. Please try again.");
       }
-    }, 1000);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-6">
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         className="bg-white w-full max-w-xl rounded-[40px] overflow-hidden shadow-2xl flex flex-col md:flex-row h-auto max-h-[90vh]"
@@ -51,7 +51,8 @@ export function AdminLogin({ onCancel, onSuccess }: AdminLoginProps) {
             <h2 className="text-4xl font-black mb-4 uppercase leading-tight">ADMIN ACCESS</h2>
             <p className="text-white/70 text-lg">Enter credentials to manage kiosk and view analytics.</p>
           </div>
-          <button 
+          <button
+            type="button"
             onClick={onCancel}
             className="mt-12 flex items-center gap-2 font-bold text-white/50 hover:text-white transition-colors"
           >
@@ -65,8 +66,8 @@ export function AdminLogin({ onCancel, onSuccess }: AdminLoginProps) {
               <label className="text-sm font-bold text-slate-400 uppercase tracking-widest">Username</label>
               <div className="relative">
                 <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="admin"
@@ -80,18 +81,18 @@ export function AdminLogin({ onCancel, onSuccess }: AdminLoginProps) {
               <label className="text-sm font-bold text-slate-400 uppercase tracking-widest">Password</label>
               <div className="relative">
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input 
-                  type="password" 
+                <input
+                  type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Enter password"
                   className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 pl-12 pr-4 focus:border-[#1E7F5C] outline-none transition-all font-medium"
                   required
                 />
               </div>
             </div>
 
-            <button 
+            <button
               type="submit"
               disabled={isLoading}
               className="w-full bg-[#1E7F5C] text-white rounded-2xl py-5 font-black text-xl shadow-lg shadow-green-900/20 flex items-center justify-center gap-3 hover:bg-[#166347] transition-all disabled:opacity-50"
@@ -100,7 +101,7 @@ export function AdminLogin({ onCancel, onSuccess }: AdminLoginProps) {
               <ArrowRight className="w-6 h-6" />
             </button>
           </form>
-          
+
           <p className="mt-8 text-center text-slate-400 font-medium">
             Authorized Personnel Only
           </p>

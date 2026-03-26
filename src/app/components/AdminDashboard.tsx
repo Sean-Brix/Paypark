@@ -121,7 +121,7 @@ export function AdminDashboard({ onLogout, onReturnToKiosk }: AdminDashboardProp
                   {menuItems.find(i => i.id === activeTab)?.label}
                 </h2>
               </div>
-              <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">System ID: {db.settings.kioskName || 'PARK-01'}</p>
+              <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">System ID: {db.settings?.kioskName || 'PARK-01'}</p>
             </div>
             
             <div className="h-10 w-[1px] bg-slate-200" />

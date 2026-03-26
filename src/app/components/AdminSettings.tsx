@@ -7,10 +7,20 @@ export function AdminSettings() {
   const db = useDatabase();
   const { settings, updateSettings, currentAdmin } = db;
 
+  if (!settings) {
+    return (
+      <div className="max-w-5xl mx-auto p-8 lg:p-12">
+        <div className="border border-slate-200 bg-white p-8 text-sm font-bold uppercase tracking-widest text-slate-400">
+          Loading settings...
+        </div>
+      </div>
+    );
+  }
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     updateSettings({
-      [name]: name.includes('Price') ? parseFloat(value) || 0 : value
+      [name]: name.includes("Price") ? parseFloat(value) || 0 : value
     });
   };
 
@@ -26,11 +36,11 @@ export function AdminSettings() {
             <Monitor className="w-6 h-6" />
             <h3 className="text-xl font-black uppercase">Kiosk Configuration</h3>
           </div>
-          
+
           <div className="grid grid-cols-2 gap-8">
             <div className="space-y-2">
               <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Kiosk Name</label>
-              <input 
+              <input
                 name="kioskName"
                 value={settings.kioskName}
                 onChange={handleChange}
@@ -41,7 +51,7 @@ export function AdminSettings() {
               <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Location</label>
               <div className="relative">
                 <MapPin className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
-                <input 
+                <input
                   name="location"
                   value={settings.location}
                   onChange={handleChange}
@@ -57,11 +67,11 @@ export function AdminSettings() {
             <CreditCard className="w-6 h-6" />
             <h3 className="text-xl font-black uppercase">Pricing Management</h3>
           </div>
-          
+
           <div className="grid grid-cols-3 gap-6">
             <div className="space-y-2">
-              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Car Price (₱)</label>
-              <input 
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Car Price (PHP)</label>
+              <input
                 type="number"
                 name="carPrice"
                 value={settings.carPrice}
@@ -70,8 +80,8 @@ export function AdminSettings() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Motorcycle (₱)</label>
-              <input 
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Motorcycle (PHP)</label>
+              <input
                 type="number"
                 name="motorcyclePrice"
                 value={settings.motorcyclePrice}
@@ -80,8 +90,8 @@ export function AdminSettings() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">E-Bike (₱)</label>
-              <input 
+              <label className="text-xs font-black text-slate-400 uppercase tracking-widest">E-Bike (PHP)</label>
+              <input
                 type="number"
                 name="ebikePrice"
                 value={settings.ebikePrice}
@@ -97,7 +107,7 @@ export function AdminSettings() {
             <User className="w-6 h-6" />
             <h3 className="text-xl font-black uppercase">Profile Security</h3>
           </div>
-          
+
           <div className="p-6 bg-slate-50 flex items-center justify-between border border-slate-100">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 bg-white shadow-sm flex items-center justify-center font-black text-[#1E7F5C] text-xl border border-slate-100">
@@ -108,14 +118,18 @@ export function AdminSettings() {
                 <p className="text-xs text-slate-400 font-bold uppercase">{currentAdmin?.role || "Admin"}</p>
               </div>
             </div>
-            <button className="px-6 py-3 border-2 border-slate-200 text-slate-500 font-black text-sm hover:border-[#1E7F5C] hover:text-[#1E7F5C] transition-all">
+            <button
+              type="button"
+              className="px-6 py-3 border-2 border-slate-200 text-slate-500 font-black text-sm hover:border-[#1E7F5C] hover:text-[#1E7F5C] transition-all"
+            >
               CHANGE PASSWORD
             </button>
           </div>
         </section>
 
         <div className="pt-6">
-          <button 
+          <button
+            type="button"
             onClick={handleSave}
             className="w-full bg-[#1E7F5C] text-white py-5 font-black text-xl shadow-lg shadow-green-900/20 flex items-center justify-center gap-3 hover:bg-[#166347] transition-all"
           >

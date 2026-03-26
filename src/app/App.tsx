@@ -54,8 +54,13 @@ function AppContent() {
         <div className="relative w-full h-screen">
           <KioskView />
           <button 
-            onClick={handleAdminAccess}
-            className="absolute bottom-6 right-6 p-4 rounded-full bg-slate-200/50 hover:bg-slate-300 transition-colors group"
+            type="button"
+            aria-label="Open admin login"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleAdminAccess();
+            }}
+            className="absolute bottom-6 right-6 z-50 p-4 rounded-full bg-slate-200/80 hover:bg-slate-300 shadow-lg shadow-slate-900/10 transition-colors group"
           >
             <Settings className="w-6 h-6 text-slate-500 group-hover:rotate-90 transition-transform duration-300" />
           </button>

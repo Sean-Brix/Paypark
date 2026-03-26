@@ -30,11 +30,18 @@ function toTransactionDto(row) {
   };
 }
 
-function cleanupOldEvents() {
+function cleanupStalePaymentState() {
   const now = Date.now();
+
   for (const [key, createdAt] of processedEvents.entries()) {
     if (now - createdAt > EVENT_TTL_MS) {
       processedEvents.delete(key);
+    }
+  }
+
+  for (const [kioskId, payment] of activePayments.entries()) {
+    if (now - Number(payment?.updatedAt ?? 0) > EVENT_TTL_MS) {
+      activePayments.delete(kioskId);
     }
   }
 }
@@ -44,22 +51,39 @@ function toAmount(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function toPaymentStatusPayload(transaction, targetAmount = null) {
-  const totalInserted = Number(transaction?.amount ?? 0);
+function toPaymentStatusPayload({
+  totalInserted = 0,
+  targetAmount = null,
+  status = "Pending",
+  transaction = null,
+} = {}) {
+  const inserted = Number(totalInserted ?? transaction?.amount ?? 0);
   const target =
     typeof targetAmount === "number" && Number.isFinite(targetAmount)
       ? targetAmount
       : null;
-  const remaining = target !== null ? Math.max(0, target - totalInserted) : null;
-  const isPaid =
-    target !== null ? totalInserted >= target : transaction?.status === "Success";
+  const remaining = target !== null ? Math.max(0, target - inserted) : null;
+  const isPaid = status === "Success" || (target !== null && inserted >= target);
 
   return {
     status: isPaid ? "Success" : "Pending",
-    totalInserted,
+    totalInserted: inserted,
     targetAmount: target,
     remaining,
     transaction: transaction ? toTransactionDto(transaction) : null,
+  };
+}
+
+function toActivePaymentResponse(kioskId, payment) {
+  return {
+    kioskId,
+    controlNumber: payment.controlNumber,
+    ...toPaymentStatusPayload({
+      totalInserted: payment.totalInserted,
+      targetAmount: payment.targetAmount,
+      status: payment.status,
+      transaction: payment.transaction,
+    }),
   };
 }
 
@@ -91,17 +115,23 @@ function buildControlNumber(prefix = "ESP") {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
 
-function getActiveSessionForTransaction(transaction) {
-  if (!transaction?.kioskId) {
-    return null;
-  }
-
-  const active = activePayments.get(transaction.kioskId);
-  if (!active || active.controlNumber !== transaction.controlNumber) {
-    return null;
-  }
-
-  return active;
+function buildPaymentSession({
+  controlNumber,
+  targetAmount,
+  type,
+  totalInserted = 0,
+  status = "Pending",
+  transaction = null,
+}) {
+  return {
+    controlNumber,
+    targetAmount,
+    type,
+    totalInserted,
+    status,
+    transaction,
+    updatedAt: Date.now(),
+  };
 }
 
 export function configurePaymentRealtime({
@@ -116,7 +146,7 @@ export function configurePaymentRealtime({
 }
 
 export async function initializePaymentSession(payload = {}) {
-  cleanupOldEvents();
+  cleanupStalePaymentState();
 
   const kioskId = normalizeKioskId(payload.kioskId);
   const vehicleType = payload.vehicleType || payload.type;
@@ -136,40 +166,24 @@ export async function initializePaymentSession(payload = {}) {
     );
   }
 
-  const controlNumber = buildControlNumber("ESP-ACTIVE");
-  const transaction = await prisma.transaction.create({
-    data: {
-      id: crypto.randomUUID(),
-      type: vehicleType.trim(),
-      amount: 0,
-      timestamp: new Date(),
-      status: "Pending",
-      kioskId,
-      controlNumber,
-    },
-  });
-
-  activePayments.set(kioskId, {
-    controlNumber,
+  const payment = buildPaymentSession({
+    controlNumber: buildControlNumber("ESP-ACTIVE"),
     targetAmount,
     type: vehicleType.trim(),
   });
 
+  activePayments.set(kioskId, payment);
+
   await safePublishOpen(1);
 
-  const response = {
-    kioskId,
-    controlNumber,
-    ...toPaymentStatusPayload(transaction, targetAmount),
-  };
-
+  const response = toActivePaymentResponse(kioskId, payment);
   await safePublishStatus(response);
 
   return response;
 }
 
 export async function recordPaymentCoin(payload = {}) {
-  cleanupOldEvents();
+  cleanupStalePaymentState();
 
   const eventId = String(payload.eventId || "").trim();
   const coinAmount = toAmount(payload.coinAmount ?? payload.amount, NaN);
@@ -179,78 +193,96 @@ export async function recordPaymentCoin(payload = {}) {
     throw toHttpError("coin amount must be a number greater than 0", 422);
   }
 
-  const active = activePayments.get(kioskId);
-  const controlNumber = active?.controlNumber;
-  let existing = controlNumber
-    ? await prisma.transaction.findUnique({ where: { controlNumber } })
-    : null;
-
-  if (!existing) {
-    existing = await prisma.transaction.findFirst({
-      where: {
-        kioskId,
-        status: "Pending",
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+  const payment = activePayments.get(kioskId);
+  if (!payment) {
+    throw toHttpError("No active payment session for this kiosk", 409);
   }
 
-  if (!existing) {
-    existing = await prisma.transaction.create({
-      data: {
-        id: crypto.randomUUID(),
-        type: DEFAULT_TYPE,
-        amount: 0,
-        timestamp: new Date(),
-        status: "Pending",
-        kioskId,
-        controlNumber: buildControlNumber("ESP-ACTIVE"),
-      },
-    });
+  const eventKey = eventId ? `${payment.controlNumber}:${eventId}` : null;
+
+  if (eventKey && processedEvents.has(eventKey)) {
+    return {
+      duplicate: true,
+      kioskId,
+      controlNumber: payment.controlNumber,
+      ...toPaymentStatusPayload({
+        totalInserted: payment.totalInserted,
+        targetAmount: payment.targetAmount,
+        status: payment.status,
+        transaction: payment.transaction,
+      }),
+    };
   }
 
-  if (eventId) {
-    const eventKey = `${existing.controlNumber}:${eventId}`;
-    if (processedEvents.has(eventKey)) {
-      return {
-        duplicate: true,
-        kioskId,
-        controlNumber: existing.controlNumber,
-        ...toPaymentStatusPayload(existing, active?.targetAmount ?? null),
-      };
+  if (payment.status === "Success") {
+    if (eventKey) {
+      processedEvents.set(eventKey, Date.now());
     }
 
+    return {
+      duplicate: true,
+      kioskId,
+      controlNumber: payment.controlNumber,
+      ...toPaymentStatusPayload({
+        totalInserted: payment.totalInserted,
+        targetAmount: payment.targetAmount,
+        status: payment.status,
+        transaction: payment.transaction,
+      }),
+    };
+  }
+
+  if (eventKey) {
     processedEvents.set(eventKey, Date.now());
   }
 
-  const previousAmount = Number(existing.amount ?? 0);
-  const nextAmount = previousAmount + coinAmount;
-  const targetAmount = active?.targetAmount ?? null;
-  const shouldMarkSuccess =
-    typeof targetAmount === "number" ? nextAmount >= targetAmount : false;
+  const nextTotalInserted = Number(payment.totalInserted ?? 0) + coinAmount;
+  const nextType = payload.vehicleType || payload.type || payment.type || DEFAULT_TYPE;
+  const shouldMarkSuccess = nextTotalInserted >= payment.targetAmount;
 
-  const transaction = await prisma.transaction.update({
-    where: { controlNumber: existing.controlNumber },
-    data: {
-      amount: nextAmount,
-      timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
-      status: shouldMarkSuccess ? "Success" : "Pending",
-      type: payload.vehicleType || payload.type || existing.type || DEFAULT_TYPE,
-    },
+  let nextPayment = buildPaymentSession({
+    controlNumber: payment.controlNumber,
+    targetAmount: payment.targetAmount,
+    type: nextType,
+    totalInserted: nextTotalInserted,
   });
 
   if (shouldMarkSuccess) {
-    activePayments.delete(kioskId);
+    const transaction = await prisma.transaction.create({
+      data: {
+        id: crypto.randomUUID(),
+        type: nextType,
+        amount: nextTotalInserted,
+        timestamp: payload.timestamp ? new Date(payload.timestamp) : new Date(),
+        status: "Success",
+        kioskId,
+        controlNumber: payment.controlNumber,
+      },
+    });
+
+    nextPayment = buildPaymentSession({
+      controlNumber: payment.controlNumber,
+      targetAmount: payment.targetAmount,
+      type: nextType,
+      totalInserted: nextTotalInserted,
+      status: "Success",
+      transaction,
+    });
   }
+
+  activePayments.set(kioskId, nextPayment);
 
   const response = {
     duplicate: false,
     kioskId,
-    controlNumber: transaction.controlNumber,
+    controlNumber: nextPayment.controlNumber,
     coinAmount,
-    ...toPaymentStatusPayload(transaction, targetAmount),
+    ...toPaymentStatusPayload({
+      totalInserted: nextPayment.totalInserted,
+      targetAmount: nextPayment.targetAmount,
+      status: nextPayment.status,
+      transaction: nextPayment.transaction,
+    }),
   };
 
   await safePublishStatus(response);
@@ -263,7 +295,7 @@ export async function recordPaymentCoin(payload = {}) {
 }
 
 export async function getPaymentStatus(payload = {}) {
-  cleanupOldEvents();
+  cleanupStalePaymentState();
 
   const controlNumber =
     typeof payload.controlNumber === "string" && payload.controlNumber.trim().length > 0
@@ -271,18 +303,14 @@ export async function getPaymentStatus(payload = {}) {
       : null;
   const kioskId = normalizeKioskId(payload.kioskId);
 
-  let transaction = controlNumber
+  const payment = activePayments.get(kioskId);
+  if (payment && (!controlNumber || payment.controlNumber === controlNumber)) {
+    return toActivePaymentResponse(kioskId, payment);
+  }
+
+  const transaction = controlNumber
     ? await prisma.transaction.findUnique({ where: { controlNumber } })
     : null;
-
-  if (!transaction) {
-    const active = activePayments.get(kioskId);
-    if (active?.controlNumber) {
-      transaction = await prisma.transaction.findUnique({
-        where: { controlNumber: active.controlNumber },
-      });
-    }
-  }
 
   if (!transaction) {
     return {
@@ -290,17 +318,19 @@ export async function getPaymentStatus(payload = {}) {
       controlNumber,
       status: "Pending",
       totalInserted: 0,
-      targetAmount: activePayments.get(kioskId)?.targetAmount ?? null,
-      remaining: activePayments.get(kioskId)?.targetAmount ?? null,
+      targetAmount: null,
+      remaining: null,
       transaction: null,
     };
   }
 
-  const active = getActiveSessionForTransaction(transaction);
-
   return {
     kioskId: transaction.kioskId,
     controlNumber: transaction.controlNumber,
-    ...toPaymentStatusPayload(transaction, active?.targetAmount ?? null),
+    ...toPaymentStatusPayload({
+      totalInserted: Number(transaction.amount ?? 0),
+      status: transaction.status,
+      transaction,
+    }),
   };
 }

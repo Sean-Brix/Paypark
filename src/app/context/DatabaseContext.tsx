@@ -35,7 +35,7 @@ interface DatabaseContextValue {
   fetchSettings: (kioskId?: string) => Promise<void>;
 
   // Expense operations
-  addExpense: (expense: Omit<Expense, "id" | "createdAt" | "updatedAt">) => Promise<Expense>;
+  addExpense: (expense: Omit<Expense, "id" | "createdAt">) => Promise<Expense>;
   fetchExpenses: (page?: number, limit?: number) => Promise<void>;
 
   // Vehicles operations
@@ -93,7 +93,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       setError(null);
-      const data = await apiClient.getTransactions(page, limit);
+      const data = await apiClient.getTransactions(page, limit, { status: "Success" });
       setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to load transactions";
@@ -191,7 +191,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
   );
 
   const addExpense = useCallback(
-    async (expense: Omit<Expense, "id" | "createdAt" | "updatedAt">) => {
+    async (expense: Omit<Expense, "id" | "createdAt">) => {
       try {
         setError(null);
         const created = await apiClient.createExpense(expense);
@@ -213,8 +213,8 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     const loadInitialData = async () => {
       await Promise.all([
         fetchSettings(),
-        fetchTransactions(),
-        fetchExpenses(),
+        fetchTransactions(1, 100),
+        fetchExpenses(1, 100),
         fetchVehicles(),
       ]);
     };

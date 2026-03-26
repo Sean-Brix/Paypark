@@ -6,9 +6,11 @@
 export interface Admin {
   id: string;
   username: string;
+  displayName: string;
+  role: string;
+  initials: string;
   lastLogin: string | null;
   createdAt: string;
-  updatedAt: string;
 }
 
 export interface Settings {
@@ -50,21 +52,19 @@ export interface Transaction {
   status: string;
   controlNumber: string;
   timestamp: string;
-  notes: string;
-  createdAt: string;
-  updatedAt: string;
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Expense {
   id: string;
-  kioskId: string;
   label: string;
   amount: number;
   category: string;
   date: string;
-  notes: string;
-  createdAt: string;
-  updatedAt: string;
+  description: string;
+  createdAt?: string;
 }
 
 export interface ApiResponse<T> {

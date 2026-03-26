@@ -20,6 +20,7 @@ function toExpenseDto(row) {
     date: row.date,
     category: row.category,
     description: row.description,
+    createdAt: row.createdAt,
   };
 }
 
@@ -75,7 +76,7 @@ export async function createExpense(req, res) {
       amount: payload.amount,
       date: payload.date ? new Date(payload.date) : new Date(),
       category: payload.category || "General",
-      description: payload.description || "",
+      description: payload.description || payload.notes || "",
     },
   });
 

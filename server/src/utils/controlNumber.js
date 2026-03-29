@@ -38,7 +38,7 @@ function extractDateKey(controlNumber) {
 }
 
 function buildTimeSegment(value) {
-  return `${value.getHours()}${pad2(value.getMinutes())}`;
+  return `${pad2(value.getHours())}${pad2(value.getMinutes())}`;
 }
 
 export function formatControlNumber(value, count) {

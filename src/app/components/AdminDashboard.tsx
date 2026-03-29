@@ -25,6 +25,7 @@ interface AdminDashboardProps {
 export function AdminDashboard({ onLogout, onReturnToKiosk }: AdminDashboardProps) {
   const db = useDatabase();
   const [activeTab, setActiveTab] = useState<"analytics" | "transactions" | "finance" | "settings">("analytics");
+  const [transactionSearch, setTransactionSearch] = useState("");
 
   const menuItems = [
     { id: "analytics", label: "Analytics", icon: LayoutDashboard },
@@ -126,14 +127,18 @@ export function AdminDashboard({ onLogout, onReturnToKiosk }: AdminDashboardProp
             
             <div className="h-10 w-[1px] bg-slate-200" />
             
-            <div className="hidden lg:flex items-center gap-4 bg-slate-50 px-4 py-2 border border-slate-200">
-              <Search className="w-4 h-4 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Search transactions..." 
-                className="bg-transparent border-none text-xs font-medium focus:ring-0 w-48 placeholder:text-slate-400"
-              />
-            </div>
+            {activeTab === "transactions" ? (
+              <div className="hidden lg:flex items-center gap-4 bg-slate-50 px-4 py-2 border border-slate-200">
+                <Search className="w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={transactionSearch}
+                  onChange={(event) => setTransactionSearch(event.target.value)}
+                  placeholder="Search transactions..."
+                  className="bg-transparent border-none text-xs font-medium focus:ring-0 w-48 placeholder:text-slate-400"
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-6">
@@ -166,7 +171,7 @@ export function AdminDashboard({ onLogout, onReturnToKiosk }: AdminDashboardProp
               className="h-full"
             >
               {activeTab === "analytics" && <DashboardHome />}
-              {activeTab === "transactions" && <TransactionsTable />}
+              {activeTab === "transactions" && <TransactionsTable searchQuery={transactionSearch} />}
               {activeTab === "finance" && <FinanceView />}
               {activeTab === "settings" && <AdminSettings />}
             </motion.div>

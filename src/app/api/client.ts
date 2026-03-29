@@ -15,6 +15,28 @@ const API_BASE_URL = (import.meta.env.VITE_API_URL || "/api").trim();
 class ApiClient {
   private baseUrl = API_BASE_URL;
 
+  private buildQuery(
+    params: Record<string, string | number | undefined | null>
+  ): string {
+    const searchParams = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(params)) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      const normalizedValue = typeof value === "string" ? value.trim() : String(value);
+      if (normalizedValue.length === 0) {
+        continue;
+      }
+
+      searchParams.set(key, normalizedValue);
+    }
+
+    const queryString = searchParams.toString();
+    return queryString.length > 0 ? `?${queryString}` : "";
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
@@ -78,26 +100,29 @@ class ApiClient {
     page: number = 1,
     limit: number = 20,
     filters?: {
+      id?: string;
+      search?: string;
       type?: string;
       status?: string;
       dateFrom?: string;
       dateTo?: string;
     }
-  ): Promise<{ transactions: Transaction[]; total: number; page: number }> {
-    const params = new URLSearchParams({
-      page: page.toString(),
-      limit: limit.toString(),
-      ...filters,
-    });
+  ): Promise<{ transactions: Transaction[]; total: number; page: number; totalPages: number; limit: number }> {
     const data = await this.request<{
       items?: Transaction[];
-      pagination?: { total?: number; page?: number };
-    }>(`/transactions?${params.toString()}`);
+      pagination?: { total?: number; page?: number; totalPages?: number; limit?: number };
+    }>(`/transactions${this.buildQuery({
+      page,
+      limit,
+      ...filters,
+    })}`);
 
     return {
       transactions: Array.isArray(data?.items) ? data.items : [],
       total: Number(data?.pagination?.total ?? 0),
       page: Number(data?.pagination?.page ?? page),
+      totalPages: Number(data?.pagination?.totalPages ?? 1),
+      limit: Number(data?.pagination?.limit ?? limit),
     };
   }
 
@@ -119,15 +144,14 @@ class ApiClient {
       dateTo?: string;
     }
   ): Promise<{ expenses: Expense[]; total: number; page: number }> {
-    const params = new URLSearchParams({
-      page: page.toString(),
-      limit: limit.toString(),
-      ...filters,
-    });
     const data = await this.request<{
       items?: Expense[];
       pagination?: { total?: number; page?: number };
-    }>(`/expenses?${params.toString()}`);
+    }>(`/expenses${this.buildQuery({
+      page,
+      limit,
+      ...filters,
+    })}`);
 
     return {
       expenses: Array.isArray(data?.items) ? data.items : [],

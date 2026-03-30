@@ -13,6 +13,7 @@ type KioskState = "idle" | "selecting" | "paying" | "printing" | "thankyou";
 const DEFAULT_RECEIPT_TITLE = "CVSU-CCAT PAY-PARKING";
 const DEFAULT_RECEIPT_FOOTER = "Thank You!";
 const RECEIPT_COPIES = ["GUARD COPY", "DRIVER COPY"];
+const PAYMENT_SUCCESS_TRANSITION_DELAY_MS = 1200;
 
 function resolveReceiptTitle(value?: string) {
   const trimmed = String(value || "").trim();
@@ -165,12 +166,29 @@ export function KioskView() {
     }
   };
 
+  const returnToVehicleSelection = useCallback(() => {
+    if (insertedAmount > 0) {
+      toast.error("Unable to go back after coins are inserted.");
+      return;
+    }
+
+    paymentCompletedRef.current = false;
+    setSelectedVehicle(null);
+    setPrice(0);
+    setLastTransaction(null);
+    setPaymentStartedAt(null);
+    setInsertedAmount(0);
+    setActiveControlNumber(null);
+    setState("selecting");
+  }, [insertedAmount]);
+
   useEffect(() => {
     if (state !== "paying") {
       return;
     }
 
     let isCancelled = false;
+    let successDelayTimeoutId: number | null = null;
     const startedAt = paymentStartedAt ?? Date.now();
     const timeoutMs = 120000;
     const pollIntervalMs = 1500;
@@ -198,14 +216,23 @@ export function KioskView() {
           setInsertedAmount(total);
 
           if (status.status === "Success" || total >= price) {
-            finalizeSuccess((status.transaction as Partial<Transaction>) || {
+            const transactionPayload = (status.transaction as Partial<Transaction>) || {
               kioskId,
               type: selectedVehicle || "Unknown",
               amount: total,
               controlNumber: status.controlNumber || activeControlNumber,
               status: "Success",
               timestamp: new Date().toISOString(),
-            });
+            };
+
+            successDelayTimeoutId = window.setTimeout(() => {
+              if (isCancelled) {
+                return;
+              }
+
+              finalizeSuccess(transactionPayload);
+            }, PAYMENT_SUCCESS_TRANSITION_DELAY_MS);
+
             return;
           }
         }
@@ -222,6 +249,9 @@ export function KioskView() {
 
     return () => {
       isCancelled = true;
+      if (successDelayTimeoutId !== null) {
+        window.clearTimeout(successDelayTimeoutId);
+      }
     };
   }, [
     activeControlNumber,
@@ -516,8 +546,16 @@ export function KioskView() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.05 }}
-            className="flex flex-col items-center justify-center text-center relative z-10"
+            className="flex flex-col items-center justify-center text-center relative z-10 w-full h-full"
           >
+            <motion.button
+              whileHover={{ x: -5 }}
+              onClick={returnToVehicleSelection}
+              className="absolute top-[2vmin] left-[2vmin] flex items-center gap-[1vmin] px-[2vmin] py-[1.2vmin] rounded-2xl bg-white shadow-sm text-slate-400 hover:text-[#1E7F5C] transition-all font-black tracking-[0.2em] border border-slate-100"
+              style={{ fontSize: "clamp(0.6rem, 1.2vmin, 0.85rem)" }}
+            >
+              <ArrowLeft style={{ width: "clamp(0.875rem, 1.5vmin, 1.25rem)", height: "clamp(0.875rem, 1.5vmin, 1.25rem)" }} /> BACK
+            </motion.button>
             <div 
               className="rounded-full bg-slate-100 flex items-center justify-center mb-[4vmin] relative"
               style={{ width: "clamp(6rem, 14vmin, 12rem)", height: "clamp(6rem, 14vmin, 12rem)" }}
@@ -550,6 +588,11 @@ export function KioskView() {
             <div className="mt-[0.5vmin] text-slate-500" style={{ fontSize: "clamp(0.75rem, 1.4vmin, 0.95rem)" }}>
               Remaining: &#8369;{Math.max(0, price - insertedAmount).toFixed(2)}
             </div>
+            {insertedAmount >= price && (
+              <p className="mt-[1.2vmin] text-[#1E7F5C] font-semibold" style={{ fontSize: "clamp(0.75rem, 1.4vmin, 0.95rem)" }}>
+                Payment received. Preparing next screen...
+              </p>
+            )}
             <p className="mt-[4vmin] text-slate-400 italic" style={{ fontSize: "clamp(0.7rem, 1.3vmin, 0.9rem)" }}>
               Do not leave until receipt is printed.
             </p>

@@ -173,6 +173,7 @@ export function DashboardHome() {
     const monthKeys: string[] = [];
     for (let i = 4; i >= 0; i--) {
       const d = new Date(now);
+      d.setDate(1);
       d.setMonth(d.getMonth() - i);
       const key = `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, "0")}`;
       monthKeys.push(key);
@@ -206,7 +207,7 @@ export function DashboardHome() {
       const [, m] = key.split("-");
       const d = monthlyMap[key];
       return {
-        name: monthNames[parseInt(m) - 1],
+        name: `${monthNames[parseInt(m) - 1]} ${key.slice(0, 4)}`,
         amount: d.amount,
         vehicles: d.Car + d.Motorcycle + d["E-Bike"],
       };

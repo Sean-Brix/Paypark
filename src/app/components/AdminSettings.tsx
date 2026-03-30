@@ -1,11 +1,19 @@
-import React from "react";
-import { Save, User, MapPin, Monitor, CreditCard } from "lucide-react";
+import React, { useState } from "react";
+import { Save, User, MapPin, Monitor, CreditCard, X, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { useDatabase } from "../context/DatabaseContext";
+import { apiClient } from "../api/client";
 
 export function AdminSettings() {
   const db = useDatabase();
   const { settings, updateSettings, currentAdmin } = db;
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   if (!settings) {
     return (
@@ -26,6 +34,69 @@ export function AdminSettings() {
 
   const handleSave = () => {
     toast.success("Settings updated successfully");
+  };
+
+  const openPasswordDialog = () => {
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setIsPasswordDialogOpen(true);
+  };
+
+  const closePasswordDialog = () => {
+    if (!isUpdatingPassword) {
+      setIsPasswordDialogOpen(false);
+    }
+  };
+
+  const handlePasswordFieldChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value } = event.target;
+    setPasswordForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handlePasswordSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!currentAdmin?.id) {
+      toast.error("No active admin session.");
+      return;
+    }
+
+    const currentPassword = passwordForm.currentPassword.trim();
+    const newPassword = passwordForm.newPassword.trim();
+    const confirmPassword = passwordForm.confirmPassword.trim();
+
+    if (!currentPassword) {
+      toast.error("Current password is required.");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      toast.error("New password must be at least 6 characters.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast.error("New password and confirm password do not match.");
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    try {
+      await apiClient.changeAdminPassword({
+        adminId: currentAdmin.id,
+        currentPassword,
+        newPassword,
+      });
+      toast.success("Admin password updated.");
+      setIsPasswordDialogOpen(false);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update password.");
+    } finally {
+      setIsUpdatingPassword(false);
+    }
   };
 
   return (
@@ -120,6 +191,7 @@ export function AdminSettings() {
             </div>
             <button
               type="button"
+              onClick={openPasswordDialog}
               className="px-6 py-3 border-2 border-slate-200 text-slate-500 font-black text-sm hover:border-[#1E7F5C] hover:text-[#1E7F5C] transition-all"
             >
               CHANGE PASSWORD
@@ -138,6 +210,93 @@ export function AdminSettings() {
           </button>
         </div>
       </div>
+
+      {isPasswordDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-6"
+          onClick={closePasswordDialog}
+        >
+          <div
+            className="w-full max-w-xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-8 py-6">
+              <div className="flex items-center gap-3">
+                <Shield className="w-6 h-6 text-[#1E7F5C]" />
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.3em] text-[#1E7F5C]">Profile Security</p>
+                  <h3 className="text-2xl font-black text-slate-800 uppercase">Change Password</h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closePasswordDialog}
+                className="flex h-11 w-11 items-center justify-center border border-slate-200 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePasswordSubmit} className="space-y-5 px-8 py-8">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Current Password</label>
+                <input
+                  type="password"
+                  name="currentPassword"
+                  value={passwordForm.currentPassword}
+                  onChange={handlePasswordFieldChange}
+                  className="w-full border-2 border-slate-100 bg-slate-50 px-5 py-4 font-bold text-slate-700 outline-none transition-all focus:border-[#1E7F5C]"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">New Password</label>
+                <input
+                  type="password"
+                  name="newPassword"
+                  value={passwordForm.newPassword}
+                  onChange={handlePasswordFieldChange}
+                  className="w-full border-2 border-slate-100 bg-slate-50 px-5 py-4 font-bold text-slate-700 outline-none transition-all focus:border-[#1E7F5C]"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Confirm New Password</label>
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  value={passwordForm.confirmPassword}
+                  onChange={handlePasswordFieldChange}
+                  className="w-full border-2 border-slate-100 bg-slate-50 px-5 py-4 font-bold text-slate-700 outline-none transition-all focus:border-[#1E7F5C]"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closePasswordDialog}
+                  disabled={isUpdatingPassword}
+                  className="px-6 py-4 border-2 border-slate-200 text-slate-500 font-black text-sm hover:border-slate-300 hover:text-slate-700 transition-all disabled:opacity-50"
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingPassword}
+                  className="px-6 py-4 bg-[#1E7F5C] text-white font-black text-sm shadow-lg shadow-green-900/20 hover:bg-[#166347] transition-all disabled:opacity-50"
+                >
+                  {isUpdatingPassword ? "UPDATING..." : "UPDATE PASSWORD"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

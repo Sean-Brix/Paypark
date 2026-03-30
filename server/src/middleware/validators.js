@@ -122,6 +122,27 @@ export function validateLogin(req, res, next) {
   return next();
 }
 
+export function validateChangePassword(req, res, next) {
+  const payload = req.body || {};
+
+  if (typeof payload.adminId !== "string" || payload.adminId.trim().length === 0) {
+    throw toHttpError("adminId is required", 422);
+  }
+
+  if (
+    typeof payload.currentPassword !== "string" ||
+    payload.currentPassword.length === 0
+  ) {
+    throw toHttpError("currentPassword is required", 422);
+  }
+
+  if (typeof payload.newPassword !== "string" || payload.newPassword.length < 6) {
+    throw toHttpError("newPassword must be at least 6 characters", 422);
+  }
+
+  return next();
+}
+
 export function validateCreateTransaction(req, res, next) {
   const payload = req.body || {};
 

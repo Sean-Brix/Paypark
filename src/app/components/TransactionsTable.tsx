@@ -1,7 +1,6 @@
 import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Search,
-  Download,
   FileText,
   ArrowUpRight,
   ChevronLeft,
@@ -37,15 +36,6 @@ function formatTime(dateValue: string) {
   });
 }
 
-function escapeCsvValue(value: string | number) {
-  const normalized = String(value ?? "");
-  if (!/[",\n]/.test(normalized)) {
-    return normalized;
-  }
-
-  return `"${normalized.replace(/"/g, "\"\"")}"`;
-}
-
 function escapeHtml(value: string | number) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -65,18 +55,40 @@ function getVisiblePages(currentPage: number, totalPages: number) {
   return Array.from({ length: endPage - startPage + 1 }, (_, index) => startPage + index);
 }
 
-function buildExportFileStamp() {
-  return new Date().toISOString().slice(0, 19).replaceAll(":", "-");
+function getMonthDateRange(monthValue: string) {
+  const normalized = String(monthValue || "").trim();
+  if (!/^\d{4}-\d{2}$/.test(normalized)) {
+    return { dateFrom: undefined as string | undefined, dateTo: undefined as string | undefined };
+  }
+
+  const [yearPart, monthPart] = normalized.split("-");
+  const year = Number.parseInt(yearPart, 10);
+  const monthIndex = Number.parseInt(monthPart, 10) - 1;
+
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+    return { dateFrom: undefined as string | undefined, dateTo: undefined as string | undefined };
+  }
+
+  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+  const dateFrom = `${yearPart}-${monthPart}-01`;
+  const dateTo = `${yearPart}-${monthPart}-${String(lastDay).padStart(2, "0")}`;
+
+  return {
+    dateFrom,
+    dateTo,
+  };
 }
 
 function buildPdfDocument(
   transactions: Transaction[],
-  filters: { search?: string; id?: string }
+  filters: { search?: string; id?: string; type?: string; month?: string }
 ) {
   const filterSummary = [
     filters.search ? `Transaction search: ${filters.search}` : null,
     filters.id ? `ID search: ${filters.id}` : null,
-    `Status: Success`,
+    filters.type ? `Vehicle type: ${filters.type}` : null,
+    filters.month ? `Month: ${filters.month}` : null,
+    "Status: Success",
   ]
     .filter(Boolean)
     .join(" | ");
@@ -194,17 +206,28 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [idQuery, setIdQuery] = useState("");
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState("All");
+  const [monthFilter, setMonthFilter] = useState("");
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [exportMonth, setExportMonth] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isExporting, setIsExporting] = useState<"csv" | "pdf" | null>(null);
+  const [isExporting, setIsExporting] = useState<"pdf" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const deferredSearchQuery = useDeferredValue(searchQuery.trim());
   const deferredIdQuery = useDeferredValue(idQuery.trim());
+  const deferredVehicleTypeFilter = useDeferredValue(vehicleTypeFilter);
+  const deferredMonthFilter = useDeferredValue(monthFilter);
   const refreshToken = db.transactions.length;
+  const monthRange = useMemo(() => getMonthDateRange(deferredMonthFilter), [deferredMonthFilter]);
+  const vehicleTypeOptions = useMemo(() => {
+    const types = db.vehicles.map((vehicle) => vehicle.type).filter(Boolean);
+    return ["All", ...Array.from(new Set(types))];
+  }, [db.vehicles]);
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, idQuery]);
+  }, [searchQuery, idQuery, vehicleTypeFilter, monthFilter]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -218,6 +241,12 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
           status: "Success",
           search: deferredSearchQuery || undefined,
           id: deferredIdQuery || undefined,
+          type:
+            deferredVehicleTypeFilter !== "All"
+              ? deferredVehicleTypeFilter || undefined
+              : undefined,
+          dateFrom: monthRange.dateFrom,
+          dateTo: monthRange.dateTo,
         });
 
         if (isCancelled) {
@@ -250,7 +279,15 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
     return () => {
       isCancelled = true;
     };
-  }, [page, deferredSearchQuery, deferredIdQuery, refreshToken]);
+  }, [
+    page,
+    deferredSearchQuery,
+    deferredIdQuery,
+    deferredVehicleTypeFilter,
+    monthRange.dateFrom,
+    monthRange.dateTo,
+    refreshToken,
+  ]);
 
   const visiblePages = useMemo(() => getVisiblePages(page, totalPages), [page, totalPages]);
 
@@ -259,19 +296,37 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
       status: "Success",
       search: searchQuery.trim() || undefined,
       id: idQuery.trim() || undefined,
+      type: vehicleTypeFilter !== "All" ? vehicleTypeFilter : undefined,
+      dateFrom: getMonthDateRange(monthFilter).dateFrom,
+      dateTo: getMonthDateRange(monthFilter).dateTo,
     }),
-    [idQuery, searchQuery]
+    [idQuery, monthFilter, searchQuery, vehicleTypeFilter]
   );
+
+  const activeFilterSummary = useMemo(() => {
+    const parts = [
+      searchQuery.trim() ? `Search: ${searchQuery.trim()}` : "Search: All transactions",
+      idQuery.trim() ? `ID: ${idQuery.trim()}` : null,
+      vehicleTypeFilter !== "All" ? `Type: ${vehicleTypeFilter}` : "Type: All",
+      monthFilter ? `Month: ${monthFilter}` : "Month: All",
+    ].filter(Boolean);
+
+    return parts.join(" | ");
+  }, [idQuery, monthFilter, searchQuery, vehicleTypeFilter]);
 
   const totalLabel = total === 1 ? "1 record" : `${total} records`;
 
-  async function getAllMatchingTransactions() {
+  async function getAllMatchingTransactions(filterOverrides?: Record<string, string | undefined>) {
     const exportedTransactions: Transaction[] = [];
     let exportPage = 1;
     let exportTotalPages = 1;
+    const exportFilters = {
+      ...activeFilters,
+      ...filterOverrides,
+    };
 
     do {
-      const data = await apiClient.getTransactions(exportPage, EXPORT_PAGE_SIZE, activeFilters);
+      const data = await apiClient.getTransactions(exportPage, EXPORT_PAGE_SIZE, exportFilters);
       exportedTransactions.push(...data.transactions);
       exportTotalPages = Math.max(1, data.totalPages);
       exportPage += 1;
@@ -280,62 +335,23 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
     return exportedTransactions;
   }
 
-  async function handleExportCsv() {
-    setIsExporting("csv");
+  function openExportModal() {
+    setExportMonth(monthFilter);
+    setIsExportModalOpen(true);
+  }
 
-    try {
-      const exportedTransactions = await getAllMatchingTransactions();
-      if (exportedTransactions.length === 0) {
-        toast.error("No transactions match the current filters.");
-        return;
-      }
-
-      const csvRows = [
-        [
-          "Transaction ID",
-          "Vehicle Type",
-          "Amount",
-          "Date",
-          "Time",
-          "Status",
-          "Control Number",
-          "Kiosk ID",
-        ].join(","),
-        ...exportedTransactions.map((transaction) =>
-          [
-            transaction.id,
-            transaction.type,
-            transaction.amount.toFixed(2),
-            formatDate(transaction.timestamp),
-            formatTime(transaction.timestamp),
-            transaction.status,
-            transaction.controlNumber,
-            transaction.kioskId,
-          ]
-            .map(escapeCsvValue)
-            .join(",")
-        ),
-      ].join("\n");
-
-      const blob = new Blob([csvRows], { type: "text/csv;charset=utf-8;" });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `transactions-table-${buildExportFileStamp()}.csv`;
-      link.click();
-      window.URL.revokeObjectURL(url);
-
-      toast.success("Transaction table exported.");
-    } catch (exportError) {
-      toast.error(
-        exportError instanceof Error ? exportError.message : "Failed to export transaction table."
-      );
-    } finally {
-      setIsExporting(null);
+  function closeExportModal() {
+    if (isExporting === null) {
+      setIsExportModalOpen(false);
     }
   }
 
   async function handleExportPdf() {
+    if (!exportMonth) {
+      toast.error("Select a month to export.");
+      return;
+    }
+
     const printWindow = window.open("", "_blank", "width=1200,height=900");
     if (!printWindow) {
       toast.error("Allow pop-ups to export the table as PDF.");
@@ -345,7 +361,11 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
     setIsExporting("pdf");
 
     try {
-      const exportedTransactions = await getAllMatchingTransactions();
+      const exportMonthRange = getMonthDateRange(exportMonth);
+      const exportedTransactions = await getAllMatchingTransactions({
+        dateFrom: exportMonthRange.dateFrom,
+        dateTo: exportMonthRange.dateTo,
+      });
       if (exportedTransactions.length === 0) {
         printWindow.close();
         toast.error("No transactions match the current filters.");
@@ -353,8 +373,16 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
       }
 
       printWindow.document.open();
-      printWindow.document.write(buildPdfDocument(exportedTransactions, activeFilters));
+      printWindow.document.write(
+        buildPdfDocument(exportedTransactions, {
+          search: activeFilters.search,
+          id: activeFilters.id,
+          type: activeFilters.type,
+          month: exportMonth || undefined,
+        })
+      );
       printWindow.document.close();
+      setIsExportModalOpen(false);
       toast.success("Print dialog opened. Choose Save as PDF to finish exporting.");
     } catch (exportError) {
       printWindow.close();
@@ -390,7 +418,7 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
         <div>
           <h3 className="text-2xl font-black text-slate-800 tracking-tight uppercase">Recent Activity</h3>
           <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">
-            Successful payment logs with live search and pagination
+            Successful payment logs with filters and pagination
           </p>
         </div>
 
@@ -407,21 +435,45 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
           </div>
           <button
             type="button"
-            onClick={handleExportCsv}
-            disabled={isExporting !== null}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-slate-900 text-white font-black text-xs uppercase tracking-widest hover:bg-[#1E7F5C] transition-all disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Download className="w-4 h-4" />
-            {isExporting === "csv" ? "Exporting..." : "Export CSV"}
-          </button>
-          <button
-            type="button"
-            onClick={handleExportPdf}
+            onClick={openExportModal}
             disabled={isExporting !== null}
             className="flex items-center justify-center gap-2 px-6 py-3 border border-slate-200 bg-white text-slate-700 font-black text-xs uppercase tracking-widest hover:border-[#1E7F5C] hover:text-[#1E7F5C] transition-all disabled:cursor-not-allowed disabled:opacity-60"
           >
             <FileText className="w-4 h-4" />
-            {isExporting === "pdf" ? "Preparing..." : "Export PDF"}
+            Export PDF
+          </button>
+        </div>
+      </div>
+
+      <div className="px-8 py-4 border-b border-slate-100 bg-white flex flex-col lg:flex-row lg:items-center gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+          <select
+            value={vehicleTypeFilter}
+            onChange={(event) => setVehicleTypeFilter(event.target.value)}
+            className="bg-slate-50 border border-slate-200 py-3 px-4 outline-none font-bold text-sm text-slate-600 focus:ring-2 focus:ring-[#1E7F5C]/10"
+          >
+            {vehicleTypeOptions.map((typeOption) => (
+              <option key={typeOption} value={typeOption}>
+                {typeOption === "All" ? "All Vehicle Types" : typeOption}
+              </option>
+            ))}
+          </select>
+          <input
+            type="month"
+            value={monthFilter}
+            onChange={(event) => setMonthFilter(event.target.value)}
+            className="bg-slate-50 border border-slate-200 py-3 px-4 outline-none font-bold text-sm text-slate-600 focus:ring-2 focus:ring-[#1E7F5C]/10"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setVehicleTypeFilter("All");
+              setMonthFilter("");
+              setIdQuery("");
+            }}
+            className="px-4 py-3 border border-slate-200 bg-white text-slate-500 font-black text-xs uppercase tracking-widest hover:border-[#1E7F5C] hover:text-[#1E7F5C] transition-all"
+          >
+            Clear Filters
           </button>
         </div>
       </div>
@@ -429,10 +481,7 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
       <div className="bg-white flex-1 overflow-hidden flex flex-col">
         <div className="px-8 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
           <span>{totalLabel}</span>
-          <span>
-            {searchQuery.trim() ? `Search: ${searchQuery.trim()}` : "Search: All transactions"}
-            {idQuery.trim() ? ` | ID: ${idQuery.trim()}` : ""}
-          </span>
+          <span>{activeFilterSummary}</span>
         </div>
 
         <div className="overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300">
@@ -576,6 +625,55 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
           </div>
         </div>
       </div>
+
+      {isExportModalOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-6"
+          onClick={closeExportModal}
+        >
+          <div
+            className="w-full max-w-lg border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-8 py-6">
+              <p className="text-xs font-black uppercase tracking-[0.3em] text-[#1E7F5C]">Transactions Export</p>
+              <h3 className="text-2xl font-black text-slate-800 uppercase">Pick Export Month</h3>
+            </div>
+
+            <div className="space-y-6 px-8 py-8">
+              <div className="space-y-2">
+                <label className="text-xs font-black uppercase tracking-widest text-slate-400">Month</label>
+                <input
+                  type="month"
+                  value={exportMonth}
+                  onChange={(event) => setExportMonth(event.target.value)}
+                  className="w-full border-2 border-slate-100 bg-slate-50 px-5 py-4 font-bold text-slate-700 outline-none transition-all focus:border-[#1E7F5C]"
+                  required
+                />
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeExportModal}
+                  disabled={isExporting !== null}
+                  className="px-6 py-4 border-2 border-slate-200 text-slate-500 font-black text-sm hover:border-slate-300 hover:text-slate-700 transition-all disabled:opacity-50"
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportPdf}
+                  disabled={isExporting !== null}
+                  className="px-6 py-4 bg-[#1E7F5C] text-white font-black text-sm shadow-lg shadow-green-900/20 hover:bg-[#166347] transition-all disabled:opacity-50"
+                >
+                  {isExporting === "pdf" ? "PREPARING..." : "EXPORT PDF"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

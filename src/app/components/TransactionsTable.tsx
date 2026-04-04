@@ -1,19 +1,25 @@
 import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Search,
-  Download,
   FileText,
   ArrowUpRight,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiClient } from "../api/client";
+import { apiClient, type TransactionQueryFilters } from "../api/client";
 import type { Transaction } from "../api/types";
 import { useDatabase } from "../context/DatabaseContext";
 
 const PAGE_SIZE = 10;
-const EXPORT_PAGE_SIZE = 100;
+type DateScope = "overall" | "day" | "month" | "year";
+
+const DATE_SCOPE_LABELS: Record<DateScope, string> = {
+  overall: "Overall",
+  day: "Per Day",
+  month: "Per Month",
+  year: "Per Year",
+};
 
 function formatCurrency(amount: number) {
   return `${"\u20B1"}${amount.toLocaleString("en-US", {
@@ -35,15 +41,6 @@ function formatTime(dateValue: string) {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function escapeCsvValue(value: string | number) {
-  const normalized = String(value ?? "");
-  if (!/[",\n]/.test(normalized)) {
-    return normalized;
-  }
-
-  return `"${normalized.replace(/"/g, "\"\"")}"`;
 }
 
 function escapeHtml(value: string | number) {
@@ -69,11 +66,89 @@ function buildExportFileStamp() {
   return new Date().toISOString().slice(0, 19).replaceAll(":", "-");
 }
 
+function getTodayDateValue() {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function getMonthValue() {
+  return getTodayDateValue().slice(0, 7);
+}
+
+function getYearValue() {
+  return getTodayDateValue().slice(0, 4);
+}
+
+function toDateValue(value: Date) {
+  const localDate = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function getDateRangeForScope(scope: DateScope, dayValue: string, monthValue: string, yearValue: string) {
+  if (scope === "day") {
+    const normalizedDay = String(dayValue || "").trim();
+    if (!normalizedDay) {
+      return {
+        label: "Per Day",
+      };
+    }
+
+    return {
+      dateFrom: normalizedDay,
+      dateTo: normalizedDay,
+      label: `Per Day: ${normalizedDay}`,
+    };
+  }
+
+  if (scope === "month") {
+    const [yearRaw, monthRaw] = String(monthValue || "").split("-");
+    const year = Number.parseInt(yearRaw || "", 10);
+    const monthIndex = Number.parseInt(monthRaw || "", 10) - 1;
+
+    if (!Number.isFinite(year) || !Number.isFinite(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+      return {
+        label: "Per Month",
+      };
+    }
+
+    const start = new Date(year, monthIndex, 1);
+    const end = new Date(year, monthIndex + 1, 0);
+
+    return {
+      dateFrom: toDateValue(start),
+      dateTo: toDateValue(end),
+      label: `Per Month: ${monthValue}`,
+    };
+  }
+
+  if (scope === "year") {
+    const parsedYear = Number.parseInt(String(yearValue || ""), 10);
+    if (!Number.isFinite(parsedYear)) {
+      return {
+        label: "Per Year",
+      };
+    }
+
+    return {
+      dateFrom: `${parsedYear}-01-01`,
+      dateTo: `${parsedYear}-12-31`,
+      label: `Per Year: ${parsedYear}`,
+    };
+  }
+
+  return {
+    label: "Overall",
+  };
+}
+
 function buildPdfDocument(
   transactions: Transaction[],
-  filters: { search?: string; id?: string }
+  filters: { search?: string; id?: string; scopeLabel: string },
+  totalAmount: number
 ) {
   const filterSummary = [
+    `Report scope: ${filters.scopeLabel}`,
     filters.search ? `Transaction search: ${filters.search}` : null,
     filters.id ? `ID search: ${filters.id}` : null,
     `Status: Success`,
@@ -156,6 +231,7 @@ function buildPdfDocument(
     <h1>Successful Transactions</h1>
     <p>Generated: ${escapeHtml(new Date().toLocaleString())}</p>
     <p>${escapeHtml(filterSummary)}</p>
+    <p><strong>Total Collected: ${escapeHtml(formatCurrency(totalAmount))}</strong></p>
     <table>
       <thead>
         <tr>
@@ -194,17 +270,38 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [idQuery, setIdQuery] = useState("");
+  const [dateScope, setDateScope] = useState<DateScope>("overall");
+  const [dayValue, setDayValue] = useState(getTodayDateValue);
+  const [monthValue, setMonthValue] = useState(getMonthValue);
+  const [yearValue, setYearValue] = useState(getYearValue);
   const [isLoading, setIsLoading] = useState(false);
-  const [isExporting, setIsExporting] = useState<"csv" | "pdf" | null>(null);
+  const [isExporting, setIsExporting] = useState<"pdf" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const deferredSearchQuery = useDeferredValue(searchQuery.trim());
   const deferredIdQuery = useDeferredValue(idQuery.trim());
   const refreshToken = db.transactions.length;
+  const dateRange = useMemo(
+    () => getDateRangeForScope(dateScope, dayValue, monthValue, yearValue),
+    [dateScope, dayValue, monthValue, yearValue]
+  );
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, idQuery]);
+  }, [searchQuery, idQuery, dateScope, dayValue, monthValue, yearValue]);
+
+  const activeFilters = useMemo<TransactionQueryFilters>(
+    () => ({
+      status: "Success",
+      search: deferredSearchQuery || undefined,
+      id: deferredIdQuery || undefined,
+      dateFrom: dateRange.dateFrom,
+      dateTo: dateRange.dateTo,
+    }),
+    [dateRange.dateFrom, dateRange.dateTo, deferredIdQuery, deferredSearchQuery]
+  );
+
+  const activeScopeLabel = dateRange.label;
 
   useEffect(() => {
     let isCancelled = false;
@@ -214,11 +311,7 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
       setError(null);
 
       try {
-        const data = await apiClient.getTransactions(page, PAGE_SIZE, {
-          status: "Success",
-          search: deferredSearchQuery || undefined,
-          id: deferredIdQuery || undefined,
-        });
+        const data = await apiClient.getTransactions(page, PAGE_SIZE, activeFilters);
 
         if (isCancelled) {
           return;
@@ -250,89 +343,14 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
     return () => {
       isCancelled = true;
     };
-  }, [page, deferredSearchQuery, deferredIdQuery, refreshToken]);
+  }, [page, activeFilters, refreshToken]);
 
   const visiblePages = useMemo(() => getVisiblePages(page, totalPages), [page, totalPages]);
-
-  const activeFilters = useMemo(
-    () => ({
-      status: "Success",
-      search: searchQuery.trim() || undefined,
-      id: idQuery.trim() || undefined,
-    }),
-    [idQuery, searchQuery]
-  );
 
   const totalLabel = total === 1 ? "1 record" : `${total} records`;
 
   async function getAllMatchingTransactions() {
-    const exportedTransactions: Transaction[] = [];
-    let exportPage = 1;
-    let exportTotalPages = 1;
-
-    do {
-      const data = await apiClient.getTransactions(exportPage, EXPORT_PAGE_SIZE, activeFilters);
-      exportedTransactions.push(...data.transactions);
-      exportTotalPages = Math.max(1, data.totalPages);
-      exportPage += 1;
-    } while (exportPage <= exportTotalPages);
-
-    return exportedTransactions;
-  }
-
-  async function handleExportCsv() {
-    setIsExporting("csv");
-
-    try {
-      const exportedTransactions = await getAllMatchingTransactions();
-      if (exportedTransactions.length === 0) {
-        toast.error("No transactions match the current filters.");
-        return;
-      }
-
-      const csvRows = [
-        [
-          "Transaction ID",
-          "Vehicle Type",
-          "Amount",
-          "Date",
-          "Time",
-          "Status",
-          "Control Number",
-          "Kiosk ID",
-        ].join(","),
-        ...exportedTransactions.map((transaction) =>
-          [
-            transaction.id,
-            transaction.type,
-            transaction.amount.toFixed(2),
-            formatDate(transaction.timestamp),
-            formatTime(transaction.timestamp),
-            transaction.status,
-            transaction.controlNumber,
-            transaction.kioskId,
-          ]
-            .map(escapeCsvValue)
-            .join(",")
-        ),
-      ].join("\n");
-
-      const blob = new Blob([csvRows], { type: "text/csv;charset=utf-8;" });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `transactions-table-${buildExportFileStamp()}.csv`;
-      link.click();
-      window.URL.revokeObjectURL(url);
-
-      toast.success("Transaction table exported.");
-    } catch (exportError) {
-      toast.error(
-        exportError instanceof Error ? exportError.message : "Failed to export transaction table."
-      );
-    } finally {
-      setIsExporting(null);
-    }
+    return apiClient.getAllTransactions(activeFilters);
   }
 
   async function handleExportPdf() {
@@ -352,8 +370,23 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
         return;
       }
 
+      const totalAmount = exportedTransactions.reduce(
+        (sum, transaction) => sum + Number(transaction.amount || 0),
+        0
+      );
+
       printWindow.document.open();
-      printWindow.document.write(buildPdfDocument(exportedTransactions, activeFilters));
+      printWindow.document.write(
+        buildPdfDocument(
+          exportedTransactions,
+          {
+            search: activeFilters.search,
+            id: activeFilters.id,
+            scopeLabel: activeScopeLabel,
+          },
+          totalAmount
+        )
+      );
       printWindow.document.close();
       toast.success("Print dialog opened. Choose Save as PDF to finish exporting.");
     } catch (exportError) {
@@ -405,15 +438,43 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
               className="w-full bg-slate-50 border border-slate-200 py-3 pl-11 pr-4 focus:ring-2 focus:ring-[#1E7F5C]/10 outline-none font-bold text-sm text-slate-600 placeholder:text-slate-300 transition-all"
             />
           </div>
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            disabled={isExporting !== null}
-            className="flex items-center justify-center gap-2 px-6 py-3 bg-slate-900 text-white font-black text-xs uppercase tracking-widest hover:bg-[#1E7F5C] transition-all disabled:cursor-not-allowed disabled:opacity-60"
+          <select
+            value={dateScope}
+            onChange={(event) => setDateScope(event.target.value as DateScope)}
+            className="bg-slate-50 border border-slate-200 py-3 px-4 focus:ring-2 focus:ring-[#1E7F5C]/10 outline-none font-bold text-sm text-slate-600"
           >
-            <Download className="w-4 h-4" />
-            {isExporting === "csv" ? "Exporting..." : "Export CSV"}
-          </button>
+            <option value="overall">Overall</option>
+            <option value="day">Per Day</option>
+            <option value="month">Per Month</option>
+            <option value="year">Per Year</option>
+          </select>
+          {dateScope === "day" ? (
+            <input
+              type="date"
+              value={dayValue}
+              onChange={(event) => setDayValue(event.target.value)}
+              className="bg-slate-50 border border-slate-200 py-3 px-4 focus:ring-2 focus:ring-[#1E7F5C]/10 outline-none font-bold text-sm text-slate-600"
+            />
+          ) : null}
+          {dateScope === "month" ? (
+            <input
+              type="month"
+              value={monthValue}
+              onChange={(event) => setMonthValue(event.target.value)}
+              className="bg-slate-50 border border-slate-200 py-3 px-4 focus:ring-2 focus:ring-[#1E7F5C]/10 outline-none font-bold text-sm text-slate-600"
+            />
+          ) : null}
+          {dateScope === "year" ? (
+            <input
+              type="number"
+              min="2000"
+              max="9999"
+              value={yearValue}
+              onChange={(event) => setYearValue(event.target.value)}
+              className="w-28 bg-slate-50 border border-slate-200 py-3 px-4 focus:ring-2 focus:ring-[#1E7F5C]/10 outline-none font-bold text-sm text-slate-600"
+              placeholder="YYYY"
+            />
+          ) : null}
           <button
             type="button"
             onClick={handleExportPdf}
@@ -430,6 +491,16 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
         <div className="px-8 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
           <span>{totalLabel}</span>
           <span>
+            {`Scope: ${DATE_SCOPE_LABELS[dateScope]}${
+              dateScope === "day"
+                ? ` (${dayValue || "Select date"})`
+                : dateScope === "month"
+                  ? ` (${monthValue || "Select month"})`
+                  : dateScope === "year"
+                    ? ` (${yearValue || "Select year"})`
+                    : ""
+            }`}
+            {" | "}
             {searchQuery.trim() ? `Search: ${searchQuery.trim()}` : "Search: All transactions"}
             {idQuery.trim() ? ` | ID: ${idQuery.trim()}` : ""}
           </span>

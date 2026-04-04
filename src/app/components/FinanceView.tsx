@@ -6,6 +6,7 @@ import {
   PieChart,
   ArrowUpCircle,
   ArrowDownCircle,
+  Trash2,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -52,9 +53,23 @@ function formatCurrency(amount: number) {
 
 export function FinanceView() {
   const db = useDatabase();
-  const { totalRevenue, totalExpenses, netProfit, expenses, settings, addExpense } = db;
+  const {
+    totalRevenue,
+    totalExpenses,
+    netProfit,
+    expenses,
+    settings,
+    addExpense,
+    removeExpense,
+  } = db;
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false);
   const [isSavingExpense, setIsSavingExpense] = useState(false);
+  const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
+  const [expensePendingDelete, setExpensePendingDelete] = useState<{
+    id: string;
+    label: string;
+    amount: number;
+  } | null>(null);
   const [expenseForm, setExpenseForm] = useState<ExpenseFormState>(() => createInitialExpenseForm());
 
   const handleExpenseFormChange = (
@@ -112,6 +127,47 @@ export function FinanceView() {
       toast.error(error instanceof Error ? error.message : "Failed to create expense.");
     } finally {
       setIsSavingExpense(false);
+    }
+  };
+
+  const handleRemoveExpense = async (expenseId: string) => {
+    if (deletingExpenseId) {
+      return;
+    }
+
+    const target = expenses.find((item) => item.id === expenseId);
+    if (!target) {
+      toast.error("Expense entry not found.");
+      return;
+    }
+
+    setExpensePendingDelete({
+      id: target.id,
+      label: target.label,
+      amount: Number(target.amount || 0),
+    });
+  };
+
+  const cancelRemoveExpense = () => {
+    if (!deletingExpenseId) {
+      setExpensePendingDelete(null);
+    }
+  };
+
+  const confirmRemoveExpense = async () => {
+    if (!expensePendingDelete || deletingExpenseId) {
+      return;
+    }
+
+    setDeletingExpenseId(expensePendingDelete.id);
+    try {
+      await removeExpense(expensePendingDelete.id);
+      toast.success("Expense removed.");
+      setExpensePendingDelete(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove expense.");
+    } finally {
+      setDeletingExpenseId(null);
     }
   };
 
@@ -176,7 +232,18 @@ export function FinanceView() {
                         ) : null}
                       </div>
                     </div>
-                    <p className="font-black text-red-400 shrink-0">-{formatCurrency(item.amount)}</p>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <p className="font-black text-red-400">-{formatCurrency(item.amount)}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveExpense(item.id)}
+                        disabled={Boolean(deletingExpenseId)}
+                        className="flex h-9 w-9 items-center justify-center border border-slate-200 text-slate-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        title="Remove expense"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 ))
               )}
@@ -312,6 +379,55 @@ export function FinanceView() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {expensePendingDelete ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-6"
+          onClick={cancelRemoveExpense}
+        >
+          <div
+            className="w-full max-w-lg border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-8 py-6">
+              <p className="text-xs font-black uppercase tracking-[0.3em] text-red-500">Expense Log</p>
+              <h3 className="mt-2 text-2xl font-black text-slate-800 uppercase">Remove Expense</h3>
+              <p className="mt-3 text-sm text-slate-500">
+                You are about to permanently delete this expense entry.
+              </p>
+            </div>
+
+            <div className="px-8 py-6">
+              <div className="border border-slate-200 bg-slate-50 px-5 py-4">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-400">Expense</p>
+                <p className="mt-1 font-bold text-slate-800">{expensePendingDelete.label}</p>
+                <p className="mt-2 text-sm font-black text-red-500">
+                  -{formatCurrency(expensePendingDelete.amount)}
+                </p>
+              </div>
+
+              <div className="mt-6 flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={cancelRemoveExpense}
+                  disabled={Boolean(deletingExpenseId)}
+                  className="px-6 py-4 border-2 border-slate-200 text-slate-500 font-black text-sm hover:border-slate-300 hover:text-slate-700 transition-all disabled:opacity-50"
+                >
+                  CANCEL
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmRemoveExpense}
+                  disabled={Boolean(deletingExpenseId)}
+                  className="px-6 py-4 bg-red-500 text-white font-black text-sm shadow-lg hover:bg-red-600 transition-all disabled:opacity-50"
+                >
+                  {deletingExpenseId ? "REMOVING..." : "REMOVE EXPENSE"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}

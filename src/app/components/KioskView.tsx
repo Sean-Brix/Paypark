@@ -13,6 +13,7 @@ type KioskState = "idle" | "selecting" | "paying" | "printing" | "thankyou";
 const DEFAULT_RECEIPT_TITLE = "CVSU-CCAT PAY-PARKING";
 const DEFAULT_RECEIPT_FOOTER = "Thank You!";
 const RECEIPT_COPIES = ["GUARD COPY", "DRIVER COPY"];
+const FINAL_PAYMENT_PREVIEW_MS = 900;
 
 function resolveReceiptTitle(value?: string) {
   const trimmed = String(value || "").trim();
@@ -50,6 +51,9 @@ export function KioskView() {
   const [insertedAmount, setInsertedAmount] = useState(0);
   const [activeControlNumber, setActiveControlNumber] = useState<string | null>(null);
   const paymentCompletedRef = useRef(false);
+  const previewTimeoutRef = useRef<number | null>(null);
+  const printingTimeoutRef = useRef<number | null>(null);
+  const thankYouTimeoutRef = useRef<number | null>(null);
 
   const [themeIndex, setThemeIndex] = useState(0);
 
@@ -79,7 +83,25 @@ export function KioskView() {
     return () => clearInterval(interval);
   }, [state, themes.length]);
 
+  const clearWaitTimers = useCallback(() => {
+    if (previewTimeoutRef.current !== null) {
+      window.clearTimeout(previewTimeoutRef.current);
+      previewTimeoutRef.current = null;
+    }
+
+    if (printingTimeoutRef.current !== null) {
+      window.clearTimeout(printingTimeoutRef.current);
+      printingTimeoutRef.current = null;
+    }
+
+    if (thankYouTimeoutRef.current !== null) {
+      window.clearTimeout(thankYouTimeoutRef.current);
+      thankYouTimeoutRef.current = null;
+    }
+  }, []);
+
   const resetToIdle = useCallback(() => {
+    clearWaitTimers();
     paymentCompletedRef.current = false;
     setState("idle");
     setSelectedVehicle(null);
@@ -88,9 +110,10 @@ export function KioskView() {
     setPaymentStartedAt(null);
     setInsertedAmount(0);
     setActiveControlNumber(null);
-  }, []);
+  }, [clearWaitTimers]);
 
   const startSession = useCallback(() => {
+    clearWaitTimers();
     paymentCompletedRef.current = false;
     setSelectedVehicle(null);
     setPrice(0);
@@ -99,7 +122,7 @@ export function KioskView() {
     setInsertedAmount(0);
     setActiveControlNumber(null);
     setState("selecting");
-  }, []);
+  }, [clearWaitTimers]);
 
   const toUiTransaction = useCallback(
     (value: Partial<Transaction> | null | undefined): Transaction => {
@@ -122,27 +145,72 @@ export function KioskView() {
   );
 
   const finalizeSuccess = useCallback(
-    (value: Partial<Transaction> | null | undefined) => {
+    (value: Partial<Transaction> | null | undefined, finalInsertedAmount?: number) => {
       if (paymentCompletedRef.current) {
         return;
       }
 
+      clearWaitTimers();
       paymentCompletedRef.current = true;
       const transaction = toUiTransaction(value);
-      setInsertedAmount(Number(transaction.amount || 0));
-      setLastTransaction(transaction);
-      setState("printing");
+      const resolvedFinalAmount = Number.isFinite(finalInsertedAmount)
+        ? Number(finalInsertedAmount)
+        : Number(transaction.amount || 0);
+      const finalizedTransaction = {
+        ...transaction,
+        amount: resolvedFinalAmount,
+      };
 
-      setTimeout(() => {
-        setState("thankyou");
+      setInsertedAmount(resolvedFinalAmount);
+      setLastTransaction(finalizedTransaction);
 
-        setTimeout(() => {
-          resetToIdle();
-        }, 5000);
-      }, 7000);
+      // Keep the user on payment screen briefly so the final inserted amount is visible.
+      previewTimeoutRef.current = window.setTimeout(() => {
+        previewTimeoutRef.current = null;
+        setState("printing");
+
+        printingTimeoutRef.current = window.setTimeout(() => {
+          printingTimeoutRef.current = null;
+          setState("thankyou");
+
+          thankYouTimeoutRef.current = window.setTimeout(() => {
+            thankYouTimeoutRef.current = null;
+            resetToIdle();
+          }, 5000);
+        }, 7000);
+      }, FINAL_PAYMENT_PREVIEW_MS);
     },
-    [resetToIdle, toUiTransaction]
+    [clearWaitTimers, resetToIdle, toUiTransaction]
   );
+
+  const proceedToThankYou = useCallback(() => {
+    if (state !== "printing") {
+      return;
+    }
+
+    clearWaitTimers();
+    setState("thankyou");
+
+    thankYouTimeoutRef.current = window.setTimeout(() => {
+      thankYouTimeoutRef.current = null;
+      resetToIdle();
+    }, 5000);
+  }, [clearWaitTimers, resetToIdle, state]);
+
+  const proceedToIdle = useCallback(() => {
+    if (state !== "thankyou") {
+      return;
+    }
+
+    clearWaitTimers();
+    resetToIdle();
+  }, [clearWaitTimers, resetToIdle, state]);
+
+  useEffect(() => {
+    return () => {
+      clearWaitTimers();
+    };
+  }, [clearWaitTimers]);
   
   const selectVehicle = async (type: string, amount: number) => {
     try {
@@ -198,14 +266,22 @@ export function KioskView() {
           setInsertedAmount(total);
 
           if (status.status === "Success" || total >= price) {
-            finalizeSuccess((status.transaction as Partial<Transaction>) || {
-              kioskId,
-              type: selectedVehicle || "Unknown",
-              amount: total,
-              controlNumber: status.controlNumber || activeControlNumber,
-              status: "Success",
-              timestamp: new Date().toISOString(),
-            });
+            const baseTransaction =
+              (status.transaction as Partial<Transaction>) || {
+                kioskId,
+                type: selectedVehicle || "Unknown",
+                amount: total,
+                controlNumber: status.controlNumber || activeControlNumber,
+                status: "Success",
+                timestamp: new Date().toISOString(),
+              };
+
+            const statusAmount = Number(baseTransaction.amount || 0);
+            const finalAmount = Number.isFinite(total)
+              ? Math.max(total, statusAmount)
+              : statusAmount;
+
+            finalizeSuccess(baseTransaction, finalAmount);
             return;
           }
         }
@@ -563,7 +639,8 @@ export function KioskView() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="grid grid-cols-2 gap-[4vmin] items-center w-full h-full px-[4vmin] relative z-10"
+            className="grid grid-cols-2 gap-[4vmin] items-center w-full h-full px-[4vmin] relative z-10 cursor-pointer"
+            onClick={proceedToThankYou}
           >
             <div className="flex flex-col items-start text-left justify-center">
               <div 
@@ -591,6 +668,9 @@ export function KioskView() {
                 <p className="text-slate-400 font-bold mb-0.5" style={{ fontSize: "clamp(0.5rem, 1vmin, 0.75rem)" }}>AMOUNT PAID</p>
                 <p className="font-black text-slate-800" style={{ fontSize: "clamp(1rem, 2.5vmin, 1.75rem)" }}>&#8369;{receiptAmount.toFixed(2)}</p>
               </div>
+              <p className="mt-[1.5vmin] text-slate-400 font-bold uppercase tracking-widest" style={{ fontSize: "clamp(0.45rem, 0.9vmin, 0.65rem)" }}>
+                Tap screen to continue now
+              </p>
             </div>
 
             <div className="flex justify-center items-center">
@@ -679,7 +759,8 @@ export function KioskView() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.1 }}
-            className="flex flex-col items-center justify-center text-center relative z-10"
+            className="flex flex-col items-center justify-center text-center relative z-10 cursor-pointer"
+            onClick={proceedToIdle}
           >
             <motion.div
               initial={{ scale: 0 }}
@@ -729,7 +810,7 @@ export function KioskView() {
               className="mt-[1vmin] text-slate-400 font-bold uppercase tracking-widest"
               style={{ fontSize: "clamp(0.45rem, 0.9vmin, 0.65rem)" }}
             >
-              Returning to idle in a moment
+              Tap screen to continue immediately
             </p>
           </motion.div>
         )}

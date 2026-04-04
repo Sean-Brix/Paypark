@@ -12,6 +12,21 @@ import type {
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || "/api").trim();
 
+export type TransactionQueryFilters = {
+  id?: string;
+  search?: string;
+  type?: string;
+  status?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export type ExpenseQueryFilters = {
+  category?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
 class ApiClient {
   private baseUrl = API_BASE_URL;
 
@@ -99,14 +114,7 @@ class ApiClient {
   async getTransactions(
     page: number = 1,
     limit: number = 20,
-    filters?: {
-      id?: string;
-      search?: string;
-      type?: string;
-      status?: string;
-      dateFrom?: string;
-      dateTo?: string;
-    }
+    filters?: TransactionQueryFilters
   ): Promise<{ transactions: Transaction[]; total: number; page: number; totalPages: number; limit: number }> {
     const data = await this.request<{
       items?: Transaction[];
@@ -126,6 +134,21 @@ class ApiClient {
     };
   }
 
+  async getAllTransactions(filters?: TransactionQueryFilters): Promise<Transaction[]> {
+    const all: Transaction[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    do {
+      const data = await this.getTransactions(page, 100, filters);
+      all.push(...data.transactions);
+      totalPages = Math.max(1, data.totalPages);
+      page += 1;
+    } while (page <= totalPages);
+
+    return all;
+  }
+
   async createTransaction(
     transaction: Omit<Transaction, "id" | "controlNumber" | "createdAt" | "updatedAt">
   ): Promise<Transaction> {
@@ -138,11 +161,7 @@ class ApiClient {
   async getExpenses(
     page: number = 1,
     limit: number = 20,
-    filters?: {
-      category?: string;
-      dateFrom?: string;
-      dateTo?: string;
-    }
+    filters?: ExpenseQueryFilters
   ): Promise<{ expenses: Expense[]; total: number; page: number }> {
     const data = await this.request<{
       items?: Expense[];
@@ -166,6 +185,12 @@ class ApiClient {
     return this.request<Expense>("/expenses", {
       method: "POST",
       body: JSON.stringify(expense),
+    });
+  }
+
+  async deleteExpense(expenseId: string): Promise<{ id: string }> {
+    return this.request<{ id: string }>(`/expenses/${expenseId}`, {
+      method: "DELETE",
     });
   }
 

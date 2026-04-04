@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "motion/react";
 import { 
   BarChart, 
@@ -16,9 +16,11 @@ import {
   Clock, ParkingCircle, Coins, ChevronDown,
   Sun, Sunrise, Sunset
 } from "lucide-react";
-import { useDatabase } from "../context/DatabaseContext";
+import { apiClient, type TransactionQueryFilters } from "../api/client";
+import type { Transaction } from "../api/types";
 
 type TimeFilter = "hourly" | "daily" | "weekly" | "monthly";
+type AnalyticsScope = "overall" | "day";
 
 const VEHICLE_COLORS: Record<string, string> = {
   Car: "#1E7F5C",
@@ -46,20 +48,77 @@ const FILTER_SUBTITLES: Record<TimeFilter, string> = {
   monthly: "Check-ins Over the Last 5 Months",
 };
 
+function getTodayDateValue() {
+  const now = new Date();
+  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+}
+
 export function DashboardHome() {
-  const db = useDatabase();
-  const { transactions, totalRevenue } = db;
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("monthly");
+  const [analyticsScope, setAnalyticsScope] = useState<AnalyticsScope>("overall");
+  const [analyticsDate, setAnalyticsDate] = useState(getTodayDateValue);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadAnalyticsTransactions() {
+      setIsLoadingAnalytics(true);
+      setAnalyticsError(null);
+
+      try {
+        const filters: TransactionQueryFilters = {
+          status: "Success",
+        };
+
+        if (analyticsScope === "day") {
+          filters.dateFrom = analyticsDate;
+          filters.dateTo = analyticsDate;
+        }
+
+        const allTransactions = await apiClient.getAllTransactions(filters);
+        if (!isCancelled) {
+          setTransactions(allTransactions);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          setTransactions([]);
+          setAnalyticsError(
+            error instanceof Error ? error.message : "Failed to load analytics data."
+          );
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsLoadingAnalytics(false);
+        }
+      }
+    }
+
+    loadAnalyticsTransactions();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [analyticsDate, analyticsScope]);
+
+  const totalRevenue = useMemo(
+    () => transactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0),
+    [transactions]
+  );
 
   // ── Computed insights from the transaction database ──────────────
 
   const insights = useMemo(() => {
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
+    const focusDateStr = analyticsScope === "day" ? analyticsDate : todayStr;
 
-    // Today's transactions
-    const todayTx = transactions.filter(t => t.timestamp.slice(0, 10) === todayStr);
+    // Focus date transactions
+    const todayTx = transactions.filter(t => t.timestamp.slice(0, 10) === focusDateStr);
     const todayCount = todayTx.length;
     const todayAmount = todayTx.reduce((s, t) => s + t.amount, 0);
 
@@ -70,9 +129,11 @@ export function DashboardHome() {
     const yesterdayTx = transactions.filter(t => t.timestamp.slice(0, 10) === yesterdayStr);
     const yesterdayCount = yesterdayTx.length;
 
-    const countChange = yesterdayCount > 0
-      ? (((todayCount - yesterdayCount) / yesterdayCount) * 100).toFixed(1)
-      : todayCount > 0 ? "+100" : "0";
+    const countChange = analyticsScope === "day"
+      ? "0"
+      : yesterdayCount > 0
+        ? (((todayCount - yesterdayCount) / yesterdayCount) * 100).toFixed(1)
+        : todayCount > 0 ? "+100" : "0";
 
     // ── Hourly distribution (all transactions) ──
     const hourBuckets: Record<string, { Car: number; Motorcycle: number; "E-Bike": number }> = {};
@@ -248,7 +309,7 @@ export function DashboardHome() {
       avgPerDay,
       uniqueDaysCount: uniqueDays.size,
     };
-  }, [transactions]);
+  }, [analyticsDate, analyticsScope, transactions]);
 
   // ── Get active chart data based on filter ──
   const activeChartData = useMemo(() => {
@@ -265,17 +326,18 @@ export function DashboardHome() {
       {/* ── Top Stats ────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 border-b border-slate-200 divide-y md:divide-y-0 md:divide-x divide-slate-200 bg-white">
         <StatCard 
-          label="Vehicles Today" 
+          label={analyticsScope === "day" ? "Vehicles (Selected Day)" : "Vehicles Today"}
           value={insights.todayCount.toString()} 
-          trend={`${Number(insights.countChange) >= 0 ? "+" : ""}${insights.countChange}%`}
-          trendUp={Number(insights.countChange) >= 0}
+          trend={analyticsScope === "day" ? analyticsDate : `${Number(insights.countChange) >= 0 ? "+" : ""}${insights.countChange}%`}
+          trendUp={analyticsScope === "day" ? true : Number(insights.countChange) >= 0}
+          neutral={analyticsScope === "day"}
           icon={<ParkingCircle className="w-5 h-5" />}
           color="#1E7F5C"
         />
         <StatCard 
-          label="Amount Collected" 
+          label={analyticsScope === "day" ? "Amount (Selected Day)" : "Amount Collected"}
           value={`₱${totalRevenue.toLocaleString()}`} 
-          trend="All Time"
+          trend={analyticsScope === "day" ? analyticsDate : "Overall"}
           neutral
           icon={<Coins className="w-5 h-5" />}
           color="#F4B740"
@@ -298,6 +360,18 @@ export function DashboardHome() {
         />
       </div>
 
+      {isLoadingAnalytics ? (
+        <div className="border-b border-slate-200 bg-white px-8 py-3 text-xs font-bold uppercase tracking-widest text-slate-400">
+          Loading analytics data...
+        </div>
+      ) : null}
+
+      {analyticsError ? (
+        <div className="border-b border-red-100 bg-red-50 px-8 py-3 text-xs font-bold uppercase tracking-widest text-red-500">
+          {analyticsError}
+        </div>
+      ) : null}
+
       {/* ── Row 1 : Unified Chart + Vehicle Breakdown ────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 border-b border-slate-200">
         {/* Unified Chart with Dropdown */}
@@ -308,6 +382,22 @@ export function DashboardHome() {
               <p className="text-2xl font-bold text-slate-800 tracking-tight">{FILTER_SUBTITLES[timeFilter]}</p>
             </div>
             <div className="flex items-center gap-4">
+              <select
+                value={analyticsScope}
+                onChange={(event) => setAnalyticsScope(event.target.value as AnalyticsScope)}
+                className="px-4 py-2 bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors text-xs font-bold text-slate-600 uppercase tracking-wider"
+              >
+                <option value="overall">Overall</option>
+                <option value="day">Specific Day</option>
+              </select>
+              {analyticsScope === "day" ? (
+                <input
+                  type="date"
+                  value={analyticsDate}
+                  onChange={(event) => setAnalyticsDate(event.target.value)}
+                  className="px-4 py-2 bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors text-xs font-bold text-slate-600"
+                />
+              ) : null}
               
               {/* Filter Dropdown */}
               <div className="relative">
@@ -519,12 +609,12 @@ export function DashboardHome() {
             <InsightRow 
               label="Total Vehicles Served" 
               value={transactions.length.toString()}
-              sub="All time"
+              sub={analyticsScope === "day" ? "Selected day" : "Overall"}
             />
             <InsightRow 
-              label="Today's Amount Collected" 
+              label={analyticsScope === "day" ? "Selected Day Amount" : "Today's Amount Collected"}
               value={`₱${insights.todayAmount.toLocaleString()}`}
-              sub="Current day"
+              sub={analyticsScope === "day" ? analyticsDate : "Current day"}
             />
             <InsightRow 
               label="Active Parking Days" 

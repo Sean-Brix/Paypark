@@ -36,6 +36,7 @@ interface DatabaseContextValue {
 
   // Expense operations
   addExpense: (expense: Omit<Expense, "id" | "createdAt">) => Promise<Expense>;
+  removeExpense: (expenseId: string) => Promise<void>;
   fetchExpenses: (page?: number, limit?: number) => Promise<void>;
 
   // Vehicles operations
@@ -207,6 +208,24 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const removeExpense = useCallback(async (expenseId: string) => {
+    const normalizedId = String(expenseId || "").trim();
+    if (!normalizedId) {
+      throw new Error("Expense id is required");
+    }
+
+    try {
+      setError(null);
+      await apiClient.deleteExpense(normalizedId);
+      setExpenses((prev) => prev.filter((expense) => expense.id !== normalizedId));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to remove expense";
+      setError(message);
+      console.error("Error removing expense:", message);
+      throw err;
+    }
+  }, []);
+
   // ────── Initial Data Load ─────────────────────────────────────────
 
   useEffect(() => {
@@ -247,6 +266,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     updateSettings,
     fetchSettings,
     addExpense,
+    removeExpense,
     fetchExpenses,
     fetchVehicles,
     authenticateAdmin,

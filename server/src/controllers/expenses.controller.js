@@ -1,5 +1,5 @@
 import { prisma } from "../config/prisma.js";
-import { sendSuccess } from "../utils/api.js";
+import { sendSuccess, toHttpError } from "../utils/api.js";
 
 function toPositiveInt(value, fallback, { max } = {}) {
   const parsed = Number.parseInt(String(value || ""), 10);
@@ -81,4 +81,26 @@ export async function createExpense(req, res) {
   });
 
   return sendSuccess(res, toExpenseDto(created), "Expense created", 201);
+}
+
+export async function removeExpense(req, res) {
+  const id = String(req.params.id || "").trim();
+  if (!id) {
+    throw toHttpError("Expense id is required", 400);
+  }
+
+  const existing = await prisma.expense.findUnique({ where: { id } });
+  if (!existing) {
+    throw toHttpError("Expense not found", 404);
+  }
+
+  await prisma.expense.delete({ where: { id } });
+
+  return sendSuccess(
+    res,
+    {
+      id,
+    },
+    "Expense removed"
+  );
 }

@@ -7,7 +7,6 @@ import {
   Settings as SettingsIcon, 
   LogOut, 
   Monitor,
-  Bell,
   Search
 } from "lucide-react";
 import { DashboardHome } from "./DashboardHome";
@@ -142,11 +141,6 @@ export function AdminDashboard({ onLogout, onReturnToKiosk }: AdminDashboardProp
           </div>
 
           <div className="flex items-center gap-6">
-            <button className="relative w-10 h-10 bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-slate-100 transition-colors border border-slate-200">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-[#F4B740]" />
-            </button>
-            
             <div className="flex items-center gap-4 group cursor-pointer">
               <div className="text-right">
                 <p className="text-[10px] font-bold text-[#1E7F5C] uppercase tracking-widest leading-none mb-1">{admin?.role || "Admin"}</p>

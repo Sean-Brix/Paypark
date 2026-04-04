@@ -42,3 +42,38 @@ export async function login(req, res) {
 
   return sendSuccess(res, toSafeAdminPayload(updated), "Login successful");
 }
+
+export async function changePassword(req, res) {
+  const adminId = String(req.body.adminId || "").trim();
+  const currentPassword = req.body.currentPassword;
+  const newPassword = req.body.newPassword;
+
+  const admin = await prisma.admin.findUnique({
+    where: { id: adminId },
+  });
+
+  if (!admin) {
+    throw toHttpError("Administrator account not found", 404);
+  }
+
+  const isHash = /^\$2[aby]\$\d{2}\$/.test(admin.passwordHash);
+  const passwordMatches = isHash
+    ? await bcrypt.compare(currentPassword, admin.passwordHash)
+    : currentPassword === admin.passwordHash;
+
+  if (!passwordMatches) {
+    throw toHttpError("Current password is incorrect", 401);
+  }
+
+  const nextPasswordHash = await bcrypt.hash(newPassword, 10);
+
+  await prisma.admin.update({
+    where: { id: admin.id },
+    data: {
+      passwordHash: nextPasswordHash,
+      lastLogin: new Date(),
+    },
+  });
+
+  return sendSuccess(res, { updated: true }, "Password updated successfully", 200);
+}

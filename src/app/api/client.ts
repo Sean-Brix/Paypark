@@ -83,6 +83,17 @@ class ApiClient {
     });
   }
 
+  async changeAdminPassword(payload: {
+    adminId: string;
+    currentPassword: string;
+    newPassword: string;
+  }): Promise<{ updated: boolean }> {
+    return this.request<{ updated: boolean }>("/auth/password", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getSettings(kioskId: string = "KIOSK-001"): Promise<Settings> {
     return this.request<Settings>(`/settings?kioskId=${kioskId}`);
   }

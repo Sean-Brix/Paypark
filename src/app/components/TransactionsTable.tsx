@@ -3,10 +3,22 @@ import {
   Search,
   FileText,
   ArrowUpRight,
+  BarChart3,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { apiClient, type TransactionQueryFilters } from "../api/client";
 import type { Transaction } from "../api/types";
 import { useDatabase } from "../context/DatabaseContext";
@@ -20,6 +32,261 @@ const DATE_SCOPE_LABELS: Record<DateScope, string> = {
   month: "Per Month",
   year: "Per Year",
 };
+
+const DEFAULT_VEHICLE_TYPES = ["Car", "E-Bike", "Motorcycle"];
+
+type VehicleBreakdownItem = {
+  type: string;
+  count: number;
+  amount: number;
+};
+
+type TransactionStats = {
+  totalVehicles: number;
+  totalNet: number;
+  averageAmount: number;
+  vehicleBreakdown: VehicleBreakdownItem[];
+  firstTimestamp: string | null;
+  lastTimestamp: string | null;
+};
+
+type TimeframeChartPoint = {
+  label: string;
+  amount: number;
+  vehicles: number;
+};
+
+type TimeframeChartSeries = {
+  title: string;
+  subtitle: string;
+  points: TimeframeChartPoint[];
+};
+
+function normalizeVehicleType(value: string | null | undefined) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "Unknown";
+  }
+
+  const compact = trimmed.toLowerCase().replace(/[\s_-]+/g, "");
+  if (compact === "ebike") {
+    return "E-Bike";
+  }
+  if (compact === "car") {
+    return "Car";
+  }
+  if (compact === "motorcycle") {
+    return "Motorcycle";
+  }
+
+  return trimmed;
+}
+
+function calculateTransactionStats(transactions: Transaction[]): TransactionStats {
+  const vehicleTotals = new Map<string, VehicleBreakdownItem>();
+  let totalNet = 0;
+  let firstTimestampValue = Number.POSITIVE_INFINITY;
+  let lastTimestampValue = Number.NEGATIVE_INFINITY;
+
+  for (const transaction of transactions) {
+    const amount = Number(transaction.amount || 0);
+    totalNet += amount;
+
+    const vehicleType = normalizeVehicleType(transaction.type);
+    const current = vehicleTotals.get(vehicleType);
+
+    if (current) {
+      current.count += 1;
+      current.amount += amount;
+    } else {
+      vehicleTotals.set(vehicleType, {
+        type: vehicleType,
+        count: 1,
+        amount,
+      });
+    }
+
+    const timestamp = new Date(transaction.timestamp).getTime();
+    if (Number.isFinite(timestamp)) {
+      firstTimestampValue = Math.min(firstTimestampValue, timestamp);
+      lastTimestampValue = Math.max(lastTimestampValue, timestamp);
+    }
+  }
+
+  const vehicleBreakdown = Array.from(vehicleTotals.values()).sort(
+    (left, right) => right.count - left.count || left.type.localeCompare(right.type)
+  );
+
+  return {
+    totalVehicles: transactions.length,
+    totalNet,
+    averageAmount: transactions.length > 0 ? totalNet / transactions.length : 0,
+    vehicleBreakdown,
+    firstTimestamp: Number.isFinite(firstTimestampValue)
+      ? new Date(firstTimestampValue).toISOString()
+      : null,
+    lastTimestamp: Number.isFinite(lastTimestampValue)
+      ? new Date(lastTimestampValue).toISOString()
+      : null,
+  };
+}
+
+function toAxisCurrency(value: number) {
+  if (value >= 1_000_000) {
+    return `${"\u20B1"}${(value / 1_000_000).toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    return `${"\u20B1"}${Math.round(value / 1_000)}k`;
+  }
+  return `${"\u20B1"}${Math.round(value)}`;
+}
+
+function buildTimeframeChartSeries(
+  transactions: Transaction[],
+  scope: DateScope
+): TimeframeChartSeries {
+  if (transactions.length === 0) {
+    return {
+      title: "Timeframe Trend",
+      subtitle: "No data in the selected timeframe.",
+      points: [],
+    };
+  }
+
+  if (scope === "day") {
+    const points = Array.from({ length: 24 }, (_, hour) => ({
+      label: `${String(hour).padStart(2, "0")}:00`,
+      amount: 0,
+      vehicles: 0,
+    }));
+
+    for (const transaction of transactions) {
+      const date = new Date(transaction.timestamp);
+      if (Number.isNaN(date.getTime())) {
+        continue;
+      }
+
+      const hour = date.getHours();
+      points[hour].vehicles += 1;
+      points[hour].amount += Number(transaction.amount || 0);
+    }
+
+    return {
+      title: "Hourly Trend",
+      subtitle: "Vehicles and collection amount by hour for the selected day.",
+      points,
+    };
+  }
+
+  if (scope === "month") {
+    const byDay = new Map<number, TimeframeChartPoint>();
+
+    for (const transaction of transactions) {
+      const date = new Date(transaction.timestamp);
+      if (Number.isNaN(date.getTime())) {
+        continue;
+      }
+
+      const day = date.getDate();
+      const current =
+        byDay.get(day) ||
+        ({
+          label: String(day).padStart(2, "0"),
+          amount: 0,
+          vehicles: 0,
+        } as TimeframeChartPoint);
+
+      current.vehicles += 1;
+      current.amount += Number(transaction.amount || 0);
+      byDay.set(day, current);
+    }
+
+    const points = Array.from(byDay.entries())
+      .sort((left, right) => left[0] - right[0])
+      .map(([, value]) => value);
+
+    return {
+      title: "Daily Trend",
+      subtitle: "Vehicles and collection amount by day for the selected month.",
+      points,
+    };
+  }
+
+  if (scope === "year") {
+    const monthLabels = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+    const points = monthLabels.map((label) => ({
+      label,
+      amount: 0,
+      vehicles: 0,
+    }));
+
+    for (const transaction of transactions) {
+      const date = new Date(transaction.timestamp);
+      if (Number.isNaN(date.getTime())) {
+        continue;
+      }
+
+      const monthIndex = date.getMonth();
+      points[monthIndex].vehicles += 1;
+      points[monthIndex].amount += Number(transaction.amount || 0);
+    }
+
+    return {
+      title: "Monthly Trend",
+      subtitle: "Vehicles and collection amount by month for the selected year.",
+      points,
+    };
+  }
+
+  const byMonth = new Map<number, TimeframeChartPoint>();
+
+  for (const transaction of transactions) {
+    const date = new Date(transaction.timestamp);
+    if (Number.isNaN(date.getTime())) {
+      continue;
+    }
+
+    const monthKey = date.getFullYear() * 100 + date.getMonth();
+    const label = date.toLocaleDateString("en-US", {
+      month: "short",
+      year: "2-digit",
+    });
+    const current =
+      byMonth.get(monthKey) ||
+      ({
+        label,
+        amount: 0,
+        vehicles: 0,
+      } as TimeframeChartPoint);
+
+    current.vehicles += 1;
+    current.amount += Number(transaction.amount || 0);
+    byMonth.set(monthKey, current);
+  }
+
+  const points = Array.from(byMonth.entries())
+    .sort((left, right) => left[0] - right[0])
+    .map(([, value]) => value);
+
+  return {
+    title: "Collection Trend",
+    subtitle: "Vehicles and collection amount by month across the selected range.",
+    points,
+  };
+}
 
 function formatCurrency(amount: number) {
   return `${"\u20B1"}${amount.toLocaleString("en-US", {
@@ -142,19 +409,154 @@ function getDateRangeForScope(scope: DateScope, dayValue: string, monthValue: st
   };
 }
 
+function buildAmountTrendSvg(points: TimeframeChartPoint[]) {
+  if (points.length === 0) {
+    return '<p class="graph-empty">No timeframe trend data available.</p>';
+  }
+
+  const width = 860;
+  const height = 220;
+  const paddingLeft = 52;
+  const paddingRight = 18;
+  const paddingTop = 18;
+  const paddingBottom = 42;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+  const baseY = paddingTop + chartHeight;
+  const maxAmount = Math.max(
+    1,
+    ...points.map((point) => Number(point.amount || 0))
+  );
+
+  const pointsWithCoords = points.map((point, index) => {
+    const x =
+      points.length === 1
+        ? paddingLeft + chartWidth / 2
+        : paddingLeft + (index / (points.length - 1)) * chartWidth;
+    const y =
+      baseY - (Number(point.amount || 0) / maxAmount) * chartHeight;
+
+    return {
+      ...point,
+      x,
+      y,
+    };
+  });
+
+  const linePath = pointsWithCoords
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(" ");
+
+  const firstPoint = pointsWithCoords[0];
+  const lastPoint = pointsWithCoords[pointsWithCoords.length - 1];
+  const areaPath = `${linePath} L ${lastPoint.x.toFixed(2)} ${baseY.toFixed(2)} L ${firstPoint.x.toFixed(2)} ${baseY.toFixed(2)} Z`;
+
+  const gridLines = Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4;
+    const y = paddingTop + chartHeight * ratio;
+    const amount = maxAmount * (1 - ratio);
+
+    return `
+      <line x1="${paddingLeft}" y1="${y.toFixed(2)}" x2="${(width - paddingRight).toFixed(2)}" y2="${y.toFixed(2)}" stroke="#e2e8f0" stroke-dasharray="4 4" />
+      <text x="${(paddingLeft - 8).toFixed(2)}" y="${(y + 4).toFixed(2)}" text-anchor="end" font-size="9" font-weight="700" fill="#94a3b8">${escapeHtml(toAxisCurrency(amount))}</text>
+    `;
+  }).join("");
+
+  const maxVisibleLabels = 10;
+  const labelStep = points.length <= maxVisibleLabels
+    ? 1
+    : Math.ceil(points.length / maxVisibleLabels);
+
+  const labels = pointsWithCoords
+    .map((point, index) => {
+      if (index % labelStep !== 0 && index !== pointsWithCoords.length - 1) {
+        return "";
+      }
+
+      return `<text x="${point.x.toFixed(2)}" y="${(height - 14).toFixed(2)}" text-anchor="middle" font-size="9" font-weight="700" fill="#94a3b8">${escapeHtml(point.label)}</text>`;
+    })
+    .join("");
+
+  const dots = pointsWithCoords
+    .map(
+      (point) =>
+        `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="2.8" fill="#1E7F5C" stroke="#ffffff" stroke-width="1.5" />`
+    )
+    .join("");
+
+  return `
+    <svg class="trend-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Timeframe amount trend">
+      ${gridLines}
+      <path d="${areaPath}" fill="#1E7F5C" opacity="0.14" />
+      <path d="${linePath}" fill="none" stroke="#1E7F5C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+      ${dots}
+      ${labels}
+    </svg>
+  `;
+}
+
+function buildVehicleDistributionGraphMarkup(stats: TransactionStats) {
+  if (stats.vehicleBreakdown.length === 0) {
+    return '<p class="graph-empty">No vehicle distribution data available.</p>';
+  }
+
+  const maxCount = Math.max(
+    1,
+    ...stats.vehicleBreakdown.map((item) => Number(item.count || 0))
+  );
+  const colors = ["#1E7F5C", "#F4B740", "#3B82F6", "#0EA5E9", "#8B5CF6"];
+
+  const rows = stats.vehicleBreakdown
+    .map((item, index) => {
+      const count = Number(item.count || 0);
+      const normalizedWidth = (count / maxCount) * 100;
+      const share = stats.totalVehicles > 0 ? (count / stats.totalVehicles) * 100 : 0;
+      const color = colors[index % colors.length];
+
+      return `
+        <div class="dist-row">
+          <div class="dist-label">${escapeHtml(item.type)}</div>
+          <div class="dist-track">
+            <span class="dist-fill" style="width:${normalizedWidth.toFixed(2)}%; background:${color};"></span>
+          </div>
+          <div class="dist-meta">${escapeHtml(count)} (${escapeHtml(share.toFixed(1))}%)</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  return `<div class="dist-list">${rows}</div>`;
+}
+
 function buildPdfDocument(
   transactions: Transaction[],
-  filters: { search?: string; id?: string; scopeLabel: string },
-  totalAmount: number
+  filters: {
+    search?: string;
+    id?: string;
+    type?: string;
+    scopeLabel: string;
+    scope: DateScope;
+  },
+  stats: TransactionStats
 ) {
+  const timeframeSeries = buildTimeframeChartSeries(transactions, filters.scope);
+  const timeframeTrendGraph = buildAmountTrendSvg(timeframeSeries.points);
+  const vehicleDistributionGraph = buildVehicleDistributionGraphMarkup(stats);
+
   const filterSummary = [
     `Report scope: ${filters.scopeLabel}`,
+    filters.type ? `Vehicle filter: ${filters.type}` : null,
     filters.search ? `Transaction search: ${filters.search}` : null,
     filters.id ? `ID search: ${filters.id}` : null,
     `Status: Success`,
   ]
     .filter(Boolean)
     .join(" | ");
+
+  const coverageLabel =
+    stats.firstTimestamp && stats.lastTimestamp
+      ? `${formatDate(stats.firstTimestamp)} ${formatTime(stats.firstTimestamp)} - ${formatDate(stats.lastTimestamp)} ${formatTime(stats.lastTimestamp)}`
+      : "No timestamp coverage available";
 
   const rows = transactions
     .map(
@@ -194,16 +596,144 @@ function buildPdfDocument(
         font-size: 28px;
       }
 
+      h2 {
+        margin: 24px 0 8px;
+        font-size: 16px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #334155;
+      }
+
       p {
         margin: 0 0 8px;
         color: #475569;
       }
 
+      .page {
+        page-break-after: always;
+      }
+
+      .page:last-child {
+        page-break-after: auto;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 20px;
+      }
+
+      .stat-card {
+        border: 1px solid #cbd5e1;
+        padding: 12px;
+        background: #f8fafc;
+      }
+
+      .stat-card .label {
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .stat-card .value {
+        margin-top: 6px;
+        color: #0f172a;
+        font-size: 20px;
+        font-weight: 800;
+      }
+
+      .summary-line {
+        margin-top: 10px;
+        font-size: 12px;
+      }
+
+      .graph-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .graph-card {
+        border: 1px solid #cbd5e1;
+        padding: 12px;
+        background: #ffffff;
+      }
+
+      .graph-card h3 {
+        margin: 0;
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: #475569;
+      }
+
+      .graph-subtitle {
+        margin: 4px 0 10px;
+        font-size: 11px;
+        color: #64748b;
+      }
+
+      .graph-empty {
+        margin: 14px 0;
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .trend-svg {
+        width: 100%;
+        height: 190px;
+        display: block;
+      }
+
+      .dist-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 4px;
+      }
+
+      .dist-row {
+        display: grid;
+        grid-template-columns: 86px 1fr auto;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .dist-label {
+        color: #334155;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .dist-track {
+        height: 10px;
+        background: #e2e8f0;
+      }
+
+      .dist-fill {
+        display: block;
+        height: 100%;
+      }
+
+      .dist-meta {
+        color: #475569;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
-        margin-top: 24px;
         font-size: 12px;
+      }
+
+      .transactions-table {
+        margin-top: 24px;
       }
 
       th,
@@ -224,31 +754,81 @@ function buildPdfDocument(
         body {
           margin: 16px;
         }
+
+        .page {
+          break-after: page;
+          page-break-after: always;
+        }
+
+        .page:last-child {
+          break-after: auto;
+          page-break-after: auto;
+        }
       }
     </style>
   </head>
   <body>
-    <h1>Successful Transactions</h1>
-    <p>Generated: ${escapeHtml(new Date().toLocaleString())}</p>
-    <p>${escapeHtml(filterSummary)}</p>
-    <p><strong>Total Collected: ${escapeHtml(formatCurrency(totalAmount))}</strong></p>
-    <table>
-      <thead>
-        <tr>
-          <th>Transaction ID</th>
-          <th>Vehicle</th>
-          <th>Amount</th>
-          <th>Date</th>
-          <th>Time</th>
-          <th>Status</th>
-          <th>Control No.</th>
-          <th>Kiosk</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows}
-      </tbody>
-    </table>
+    <section class="page">
+      <h1>Transactions Summary</h1>
+      <p>Generated: ${escapeHtml(new Date().toLocaleString())}</p>
+      <p>${escapeHtml(filterSummary)}</p>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="label">Total Vehicles</div>
+          <div class="value">${escapeHtml(stats.totalVehicles)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Total Net Collected</div>
+          <div class="value">${escapeHtml(formatCurrency(stats.totalNet))}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Average Per Vehicle</div>
+          <div class="value">${escapeHtml(formatCurrency(stats.averageAmount))}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">Vehicle Types</div>
+          <div class="value">${escapeHtml(stats.vehicleBreakdown.length)}</div>
+        </div>
+      </div>
+
+      <p class="summary-line"><strong>Date Coverage:</strong> ${escapeHtml(coverageLabel)}</p>
+
+      <div class="graph-grid">
+        <section class="graph-card">
+          <h3>${escapeHtml(timeframeSeries.title)}</h3>
+          <p class="graph-subtitle">${escapeHtml(timeframeSeries.subtitle)}</p>
+          ${timeframeTrendGraph}
+        </section>
+        <section class="graph-card">
+          <h3>Vehicle Distribution</h3>
+          <p class="graph-subtitle">Vehicle share based on the selected timeframe filters.</p>
+          ${vehicleDistributionGraph}
+        </section>
+      </div>
+    </section>
+
+    <section class="page">
+      <h1>Successful Transactions</h1>
+      <p><strong>Total Collected: ${escapeHtml(formatCurrency(stats.totalNet))}</strong></p>
+      <table class="transactions-table">
+        <thead>
+          <tr>
+            <th>Transaction ID</th>
+            <th>Vehicle</th>
+            <th>Amount</th>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Status</th>
+            <th>Control No.</th>
+            <th>Kiosk</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </section>
     <script>
       window.addEventListener("load", () => {
         window.setTimeout(() => window.print(), 150);
@@ -270,10 +850,16 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [idQuery, setIdQuery] = useState("");
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState("all");
   const [dateScope, setDateScope] = useState<DateScope>("overall");
   const [dayValue, setDayValue] = useState(getTodayDateValue);
   const [monthValue, setMonthValue] = useState(getMonthValue);
   const [yearValue, setYearValue] = useState(getYearValue);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [isStatsLoading, setIsStatsLoading] = useState(false);
+  const [stats, setStats] = useState<TransactionStats | null>(null);
+  const [statsTransactions, setStatsTransactions] = useState<Transaction[]>([]);
+  const [statsError, setStatsError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState<"pdf" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -285,23 +871,46 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
     () => getDateRangeForScope(dateScope, dayValue, monthValue, yearValue),
     [dateScope, dayValue, monthValue, yearValue]
   );
+  const vehicleTypeOptions = useMemo(() => {
+    const orderedTypes = [...DEFAULT_VEHICLE_TYPES];
+    const seenTypes = new Set(orderedTypes.map((vehicleType) => vehicleType.toLowerCase()));
+
+    for (const vehicle of db.vehicles) {
+      const normalizedType = normalizeVehicleType(vehicle.type);
+      const key = normalizedType.toLowerCase();
+
+      if (!seenTypes.has(key)) {
+        seenTypes.add(key);
+        orderedTypes.push(normalizedType);
+      }
+    }
+
+    return orderedTypes;
+  }, [db.vehicles]);
 
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, idQuery, dateScope, dayValue, monthValue, yearValue]);
+  }, [searchQuery, idQuery, vehicleTypeFilter, dateScope, dayValue, monthValue, yearValue]);
 
   const activeFilters = useMemo<TransactionQueryFilters>(
     () => ({
       status: "Success",
       search: deferredSearchQuery || undefined,
       id: deferredIdQuery || undefined,
+      type: vehicleTypeFilter !== "all" ? vehicleTypeFilter : undefined,
       dateFrom: dateRange.dateFrom,
       dateTo: dateRange.dateTo,
     }),
-    [dateRange.dateFrom, dateRange.dateTo, deferredIdQuery, deferredSearchQuery]
+    [dateRange.dateFrom, dateRange.dateTo, deferredIdQuery, deferredSearchQuery, vehicleTypeFilter]
   );
 
   const activeScopeLabel = dateRange.label;
+  const activeVehicleTypeLabel =
+    vehicleTypeFilter === "all" ? "All vehicle types" : vehicleTypeFilter;
+  const timeframeSeries = useMemo(
+    () => buildTimeframeChartSeries(statsTransactions, dateScope),
+    [statsTransactions, dateScope]
+  );
 
   useEffect(() => {
     let isCancelled = false;
@@ -345,6 +954,52 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
     };
   }, [page, activeFilters, refreshToken]);
 
+  useEffect(() => {
+    if (!isStatsOpen) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    async function loadStats() {
+      setIsStatsLoading(true);
+      setStatsError(null);
+
+      try {
+        const matchingTransactions = await apiClient.getAllTransactions(activeFilters);
+
+        if (isCancelled) {
+          return;
+        }
+
+        setStats(calculateTransactionStats(matchingTransactions));
+        setStatsTransactions(matchingTransactions);
+      } catch (loadStatsError) {
+        if (isCancelled) {
+          return;
+        }
+
+        setStats(null);
+        setStatsTransactions([]);
+        setStatsError(
+          loadStatsError instanceof Error
+            ? loadStatsError.message
+            : "Failed to load transaction stats."
+        );
+      } finally {
+        if (!isCancelled) {
+          setIsStatsLoading(false);
+        }
+      }
+    }
+
+    loadStats();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeFilters, isStatsOpen, refreshToken]);
+
   const visiblePages = useMemo(() => getVisiblePages(page, totalPages), [page, totalPages]);
 
   const totalLabel = total === 1 ? "1 record" : `${total} records`;
@@ -370,10 +1025,7 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
         return;
       }
 
-      const totalAmount = exportedTransactions.reduce(
-        (sum, transaction) => sum + Number(transaction.amount || 0),
-        0
-      );
+      const exportStats = calculateTransactionStats(exportedTransactions);
 
       printWindow.document.open();
       printWindow.document.write(
@@ -382,9 +1034,11 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
           {
             search: activeFilters.search,
             id: activeFilters.id,
+            type: activeVehicleTypeLabel,
             scopeLabel: activeScopeLabel,
+            scope: dateScope,
           },
-          totalAmount
+          exportStats
         )
       );
       printWindow.document.close();
@@ -448,6 +1102,18 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
             <option value="month">Per Month</option>
             <option value="year">Per Year</option>
           </select>
+          <select
+            value={vehicleTypeFilter}
+            onChange={(event) => setVehicleTypeFilter(event.target.value)}
+            className="bg-slate-50 border border-slate-200 py-3 px-4 focus:ring-2 focus:ring-[#1E7F5C]/10 outline-none font-bold text-sm text-slate-600"
+          >
+            <option value="all">All Vehicles</option>
+            {vehicleTypeOptions.map((vehicleType) => (
+              <option key={vehicleType} value={vehicleType}>
+                {vehicleType}
+              </option>
+            ))}
+          </select>
           {dateScope === "day" ? (
             <input
               type="date"
@@ -488,9 +1154,9 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
       </div>
 
       <div className="bg-white flex-1 overflow-hidden flex flex-col">
-        <div className="px-8 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
+        <div className="px-8 py-4 border-b border-slate-100 grid gap-2 md:grid-cols-[auto_1fr_auto] md:items-center text-xs font-bold uppercase tracking-widest text-slate-400">
           <span>{totalLabel}</span>
-          <span>
+          <span className="md:text-right">
             {`Scope: ${DATE_SCOPE_LABELS[dateScope]}${
               dateScope === "day"
                 ? ` (${dayValue || "Select date"})`
@@ -503,8 +1169,165 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
             {" | "}
             {searchQuery.trim() ? `Search: ${searchQuery.trim()}` : "Search: All transactions"}
             {idQuery.trim() ? ` | ID: ${idQuery.trim()}` : ""}
+            {` | Vehicle: ${activeVehicleTypeLabel}`}
           </span>
+          <button
+            type="button"
+            onClick={() => setIsStatsOpen((open) => !open)}
+            className="inline-flex items-center justify-center gap-2 px-3 py-2 border border-slate-200 bg-white text-slate-600 hover:text-[#1E7F5C] hover:border-[#1E7F5C] transition-colors"
+          >
+            <BarChart3 className="w-4 h-4" />
+            {isStatsOpen ? "Hide Stats" : "Show Stats"}
+            {isStatsOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
         </div>
+
+        {isStatsOpen ? (
+          <div className="px-8 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-3">
+            {isStatsLoading ? (
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                Loading stats...
+              </p>
+            ) : statsError ? (
+              <p className="text-xs font-bold uppercase tracking-widest text-red-400">
+                {statsError}
+              </p>
+            ) : stats ? (
+              <>
+                <p className="text-sm font-black text-slate-700 tracking-wide">
+                  {`Total Vehicle: ${stats.totalVehicles}`}
+                  {stats.vehicleBreakdown.length > 0
+                    ? ` | ${stats.vehicleBreakdown
+                        .map((vehicle) => `${vehicle.type}: ${vehicle.count}`)
+                        .join(" | ")}`
+                    : ""}
+                </p>
+                <div className="border border-slate-200 bg-white px-4 py-4">
+                  <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-3">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                        {timeframeSeries.title}
+                      </p>
+                      <p className="text-sm font-bold text-slate-700 mt-1">
+                        {timeframeSeries.subtitle}
+                      </p>
+                    </div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      {timeframeSeries.points.length} points
+                    </p>
+                  </div>
+
+                  {timeframeSeries.points.length > 0 ? (
+                    <div className="h-60 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={timeframeSeries.points}>
+                          <defs>
+                            <linearGradient id="transactionsAmountGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#1E7F5C" stopOpacity={0.2} />
+                              <stop offset="95%" stopColor="#1E7F5C" stopOpacity={0} />
+                            </linearGradient>
+                            <linearGradient id="transactionsVehiclesGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#F4B740" stopOpacity={0.2} />
+                              <stop offset="95%" stopColor="#F4B740" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis
+                            dataKey="label"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: "#94a3b8", fontWeight: 700, fontSize: 11 }}
+                            minTickGap={20}
+                          />
+                          <YAxis
+                            yAxisId="left"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: "#94a3b8", fontWeight: 600, fontSize: 10 }}
+                            tickFormatter={toAxisCurrency}
+                          />
+                          <YAxis
+                            yAxisId="right"
+                            orientation="right"
+                            axisLine={false}
+                            tickLine={false}
+                            tick={{ fill: "#94a3b8", fontWeight: 600, fontSize: 10 }}
+                            allowDecimals={false}
+                          />
+                          <Tooltip content={<TimeframeTooltip />} />
+                          <Area
+                            yAxisId="left"
+                            type="monotone"
+                            dataKey="amount"
+                            stroke="#1E7F5C"
+                            strokeWidth={2.5}
+                            fillOpacity={1}
+                            fill="url(#transactionsAmountGradient)"
+                            dot={{ r: 3, fill: "#1E7F5C", strokeWidth: 2, stroke: "#fff" }}
+                          />
+                          <Area
+                            yAxisId="right"
+                            type="monotone"
+                            dataKey="vehicles"
+                            stroke="#F4B740"
+                            strokeWidth={2}
+                            fillOpacity={1}
+                            fill="url(#transactionsVehiclesGradient)"
+                            dot={{ r: 3, fill: "#F4B740", strokeWidth: 2, stroke: "#fff" }}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400 py-8 text-center">
+                      No trend points available for this timeframe.
+                    </p>
+                  )}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Total Net
+                    </p>
+                    <p className="text-lg font-black text-slate-800 mt-1">
+                      {formatCurrency(stats.totalNet)}
+                    </p>
+                  </div>
+                  <div className="border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Average / Vehicle
+                    </p>
+                    <p className="text-lg font-black text-slate-800 mt-1">
+                      {formatCurrency(stats.averageAmount)}
+                    </p>
+                  </div>
+                  <div className="border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Vehicle Types
+                    </p>
+                    <p className="text-lg font-black text-slate-800 mt-1">
+                      {stats.vehicleBreakdown.length}
+                    </p>
+                  </div>
+                  <div className="border border-slate-200 bg-white px-4 py-3">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                      Date Coverage
+                    </p>
+                    <p className="text-[11px] font-bold text-slate-600 mt-1 leading-relaxed">
+                      {stats.firstTimestamp && stats.lastTimestamp
+                        ? `${formatDate(stats.firstTimestamp)} ${formatTime(stats.firstTimestamp)} - ${formatDate(stats.lastTimestamp)} ${formatTime(stats.lastTimestamp)}`
+                        : "No timestamp coverage"}
+                    </p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                No stats available for the current filters.
+              </p>
+            )}
+          </div>
+        ) : null}
 
         <div className="overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-300">
           <table className="w-full text-left border-collapse">
@@ -647,6 +1470,31 @@ export function TransactionsTable({ searchQuery = "" }: TransactionsTableProps) 
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function TimeframeTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ dataKey?: string; value?: number }>;
+  label?: string;
+}) {
+  if (!active || !payload || payload.length === 0) {
+    return null;
+  }
+
+  const amount = Number(payload.find((item) => item.dataKey === "amount")?.value || 0);
+  const vehicles = Number(payload.find((item) => item.dataKey === "vehicles")?.value || 0);
+
+  return (
+    <div className="border border-slate-200 bg-white px-3 py-2 shadow-lg">
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{label}</p>
+      <p className="text-xs font-bold text-slate-700 mt-1">{`Amount: ${formatCurrency(amount)}`}</p>
+      <p className="text-xs font-bold text-slate-700">{`Vehicles: ${vehicles}`}</p>
     </div>
   );
 }

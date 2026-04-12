@@ -620,10 +620,10 @@ export function KioskView() {
             <div className="font-black text-[#1E7F5C]" style={{ fontSize: "clamp(2.5rem, 8vmin, 5.5rem)" }}>
               &#8369;{price.toFixed(2)}
             </div>
-            <div className="mt-[1.5vmin] text-slate-600 font-bold" style={{ fontSize: "clamp(0.85rem, 1.8vmin, 1.1rem)" }}>
+            <div className="mt-[1.5vmin] text-slate-600 font-bold" style={{ fontSize: "clamp(1.15rem, 2.4vmin, 1.55rem)" }}>
               Inserted: <span className="text-[#1E7F5C]">&#8369;{insertedAmount.toFixed(2)}</span>
             </div>
-            <div className="mt-[0.5vmin] text-slate-500" style={{ fontSize: "clamp(0.75rem, 1.4vmin, 0.95rem)" }}>
+            <div className="mt-[0.5vmin] text-slate-500" style={{ fontSize: "clamp(1.05rem, 2.1vmin, 1.4rem)" }}>
               Remaining: &#8369;{Math.max(0, price - insertedAmount).toFixed(2)}
             </div>
             <p className="mt-[4vmin] text-slate-400 italic" style={{ fontSize: "clamp(0.7rem, 1.3vmin, 0.9rem)" }}>

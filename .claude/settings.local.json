@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\kcsea\\\\\\\\CODE\\\\\\\\Paypark\\\\\\\\src\\\\\\\\app\\\\\\\\components\")",
+      "Bash(grep -E \"\\\\.tsx$|\\\\.ts$\")",
+      "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\kcsea\\\\\\\\CODE\\\\\\\\Paypark\\\\\\\\src\\\\\\\\app\\\\\\\\api\")",
+      "Bash(find \"c:\\\\\\\\Users\\\\\\\\kcsea\\\\\\\\CODE\\\\\\\\Paypark\\\\\\\\src\" -name \"route.ts\" -o -name \"route.tsx\")",
+      "Bash(find \"c:\\\\\\\\Users\\\\\\\\kcsea\\\\\\\\CODE\\\\\\\\Paypark\" -type d -name \"routes\" -o -type d -name \"pages\")",
+      "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\kcsea\\\\\\\\CODE\\\\\\\\Paypark\\\\\\\\server\\\\\\\\src\\\\\\\\routes\")",
+      "Bash(find \"c:\\\\\\\\Users\\\\\\\\kcsea\\\\\\\\CODE\\\\\\\\Paypark\\\\\\\\server\\\\\\\\src\" -type f -name \"*print*\")"
+    ]
+  }
+}

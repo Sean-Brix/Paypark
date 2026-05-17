@@ -70,17 +70,50 @@ function resolveReceiptFooter(value) {
   return trimmed;
 }
 
+const TIME_ZONE = process.env.PAYPARK_TIME_ZONE || "Asia/Manila";
+const tsFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function formatTimestamp(timestamp) {
+  if (!timestamp) return { date: "", time: "" };
+  try {
+    const parts = tsFormatter.formatToParts(new Date(timestamp)).reduce((acc, p) => {
+      if (p.type !== "literal") acc[p.type] = p.value;
+      return acc;
+    }, {});
+    return {
+      date: `${parts.month}/${parts.day}/${parts.year}`,
+      time: `${parts.hour}:${parts.minute}`,
+    };
+  } catch {
+    return { date: "", time: "" };
+  }
+}
+
 function buildReceiptCopyText(data, copyLabel) {
   const divider = "-".repeat(RECEIPT_CHARS);
   const amountText = Number(data.amount).toFixed(2);
+  const { date, time } = formatTimestamp(data.timestamp);
+  const vehicleType = String(data.vehicleType || "").toLowerCase();
+  const controlNum = String(data.controlNumber).replace("-", "\xB7");
 
   return [
     center(resolveReceiptTitle(data.receiptHeader)),
-    divider,
-    line("AMOUNT:", amountText),
     "",
-    "CONTROL NUMBER:",
-    center(data.controlNumber),
+    "CONTROL NUM",
+    center(controlNum),
+    "",
+    `Date: ${date}`,
+    `Time: ${time}`,
+    `Vehicle Type: ${vehicleType}`,
+    `Amount: ${amountText}`,
     divider,
     center(copyLabel),
     center(resolveReceiptFooter(data.receiptFooter)),
@@ -98,7 +131,7 @@ function buildEscPosReceipt(data) {
   const init = Buffer.from([0x1b, 0x40]);
   const normal = Buffer.from([0x1b, 0x21, 0x00]);
   const lineSpacing = Buffer.from([0x1b, 0x33, 0x20]);
-  const text = Buffer.from(`${content}\n\n`, "ascii");
+  const text = Buffer.from(`${content}\n\n`, "latin1");
   const feed = Buffer.from([0x1b, 0x64, 0x03]);
   const cut = Buffer.from([0x1d, 0x56, 0x00]);
 

@@ -69,6 +69,26 @@ export function KioskView() {
   const receiptAmount = Number(lastTransaction?.amount ?? price ?? 0);
   const receiptControlNumber = lastTransaction?.controlNumber || activeControlNumber || "---";
   const receiptVehicleType = lastTransaction?.type || selectedVehicle || "Unknown";
+  const receiptControlNumberDisplay = receiptControlNumber.replace("-", "·");
+  const receiptFormatted = (() => {
+    const ts = lastTransaction?.timestamp;
+    if (!ts) return { date: "", time: "" };
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Manila",
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(new Date(ts)).reduce((acc: Record<string, string>, p) => {
+        if (p.type !== "literal") acc[p.type] = p.value;
+        return acc;
+      }, {});
+      return { date: `${parts.month}/${parts.day}/${parts.year}`, time: `${parts.hour}:${parts.minute}` };
+    } catch {
+      return { date: "", time: "" };
+    }
+  })();
+  const receiptDate = receiptFormatted.date;
+  const receiptTime = receiptFormatted.time;
 
   useEffect(() => {
     if (state !== "idle") {
@@ -688,56 +708,55 @@ export function KioskView() {
                       key={copyLabel}
                       className={`text-center ${index < RECEIPT_COPIES.length - 1 ? "border-b-2 border-dashed border-[#2F3773]/25 pb-[1.35vmin]" : ""}`}
                     >
+                      <h3
+                        className="font-medium tracking-[0.08em]"
+                        style={{ fontSize: "clamp(0.9rem, 1.9vmin, 1.3rem)" }}
+                      >
+                        {receiptTitle}
+                      </h3>
+
+                      <div className="mt-[0.7vmin] text-left">
+                        <p
+                          className="font-medium tracking-[0.06em]"
+                          style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}
+                        >
+                          CONTROL NUM
+                        </p>
+                        <p
+                          className="font-medium text-center tracking-[0.08em] mt-[0.3vmin] break-all"
+                          style={{ fontSize: "clamp(0.9rem, 1.9vmin, 1.3rem)", lineHeight: 1.2 }}
+                        >
+                          {receiptControlNumberDisplay}
+                        </p>
+                      </div>
+
+                      <div className="mt-[0.7vmin] text-left space-y-[0.4vmin]">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>Date:</span>
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>{receiptDate}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>Time:</span>
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>{receiptTime}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>Vehicle Type:</span>
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>{receiptVehicleType.toLowerCase()}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>Amount:</span>
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>{receiptAmount.toFixed(2)}</span>
+                        </div>
+                      </div>
+
+                      <div className="border-b-2 border-dashed border-[#2F3773]/50 w-full my-[0.9vmin]" />
+
                       <p
                         className="font-bold tracking-[0.25em] opacity-70"
                         style={{ fontSize: "clamp(0.45rem, 0.8vmin, 0.6rem)" }}
                       >
                         {copyLabel}
                       </p>
-
-                      <div className="mt-[0.4vmin]">
-                        <h3
-                          className="font-medium tracking-[0.08em]"
-                          style={{ fontSize: "clamp(0.9rem, 1.9vmin, 1.3rem)" }}
-                        >
-                          {receiptTitle}
-                        </h3>
-                      </div>
-
-                      <div className="border-b-2 border-dashed border-[#2F3773]/50 w-full my-[0.9vmin]" />
-
-                      <div className="flex items-center justify-between text-left">
-                        <span
-                          className="font-medium tracking-[0.06em]"
-                          style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}
-                        >
-                          AMOUNT:
-                        </span>
-                        <span
-                          className="font-medium"
-                          style={{ fontSize: "clamp(0.8rem, 1.45vmin, 1rem)" }}
-                        >
-                          {receiptAmount.toFixed(2)}
-                        </span>
-                      </div>
-
-                      <div className="mt-[0.95vmin] text-left">
-                        <p
-                          className="font-medium tracking-[0.06em]"
-                          style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}
-                        >
-                          CONTROL NUMBER:
-                        </p>
-                        <p
-                          className="font-medium text-center tracking-[0.08em] mt-[0.45vmin] break-all"
-                          style={{ fontSize: "clamp(0.95rem, 2.1vmin, 1.5rem)", lineHeight: 1.2 }}
-                        >
-                          {receiptControlNumber}
-                        </p>
-                      </div>
-
-                      <div className="border-b-2 border-dashed border-[#2F3773]/50 w-full my-[0.9vmin]" />
-
                       <p
                         className="font-medium"
                         style={{ fontSize: "clamp(0.95rem, 2.25vmin, 1.65rem)" }}

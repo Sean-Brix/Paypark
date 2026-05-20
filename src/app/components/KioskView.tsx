@@ -12,8 +12,28 @@ type KioskState = "idle" | "selecting" | "paying" | "printing" | "thankyou";
 
 const DEFAULT_RECEIPT_TITLE = "CVSU-CCAT PAY-PARKING";
 const DEFAULT_RECEIPT_FOOTER = "Thank You!";
-const RECEIPT_COPIES = ["GUARD COPY", "DRIVER COPY"];
+const RECEIPT_COPIES = ["GUARD'S COPY", "DRIVER'S COPY"];
 const FINAL_PAYMENT_PREVIEW_MS = 900;
+
+function capitalizeFirstLetter(value: string) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+function normalizeControlNumber(value: string) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "---") {
+    return raw;
+  }
+
+  const withNormalizedDashes = raw.replace(/[‐‑‒–—−﹣－]/g, "-");
+  const replaced = withNormalizedDashes.replace(/[^A-Za-z0-9-]/g, "-");
+  return replaced.replace(/-+/g, "-");
+}
 
 function resolveReceiptTitle(value?: string) {
   const trimmed = String(value || "").trim();
@@ -69,7 +89,8 @@ export function KioskView() {
   const receiptAmount = Number(lastTransaction?.amount ?? price ?? 0);
   const receiptControlNumber = lastTransaction?.controlNumber || activeControlNumber || "---";
   const receiptVehicleType = lastTransaction?.type || selectedVehicle || "Unknown";
-  const receiptControlNumberDisplay = receiptControlNumber.replace("-", "·");
+  const receiptVehicleTypeDisplay = capitalizeFirstLetter(receiptVehicleType);
+  const receiptControlNumberDisplay = normalizeControlNumber(receiptControlNumber);
   const receiptFormatted = (() => {
     const ts = lastTransaction?.timestamp;
     if (!ts) return { date: "", time: "" };
@@ -684,7 +705,7 @@ export function KioskView() {
               </div>
               <div className="bg-black/5 p-[2.5vmin] rounded-2xl w-full border border-black/5">
                 <p className="text-slate-400 font-bold mb-0.5" style={{ fontSize: "clamp(0.5rem, 1vmin, 0.75rem)" }}>VEHICLE TYPE</p>
-                <p className="font-black text-[#1E7F5C] mb-[1.5vmin]" style={{ fontSize: "clamp(1rem, 2.5vmin, 1.75rem)" }}>{receiptVehicleType}</p>
+                <p className="font-black text-[#1E7F5C] mb-[1.5vmin]" style={{ fontSize: "clamp(1rem, 2.5vmin, 1.75rem)" }}>{receiptVehicleTypeDisplay}</p>
                 <p className="text-slate-400 font-bold mb-0.5" style={{ fontSize: "clamp(0.5rem, 1vmin, 0.75rem)" }}>AMOUNT PAID</p>
                 <p className="font-black text-slate-800" style={{ fontSize: "clamp(1rem, 2.5vmin, 1.75rem)" }}>&#8369;{receiptAmount.toFixed(2)}</p>
               </div>
@@ -741,7 +762,7 @@ export function KioskView() {
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>Vehicle Type:</span>
-                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>{receiptVehicleType.toLowerCase()}</span>
+                          <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>{receiptVehicleTypeDisplay}</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="font-medium" style={{ fontSize: "clamp(0.7rem, 1.25vmin, 0.95rem)" }}>Amount:</span>

@@ -9,7 +9,27 @@ const PRINTER_NAME = process.env.PAYPARK_PRINTER_NAME || "POS-58";
 const RECEIPT_CHARS = Number.parseInt(process.env.PAYPARK_COLUMNS || "32", 10);
 const DEFAULT_RECEIPT_TITLE = "CVSU-CCAT PAY-PARKING";
 const DEFAULT_RECEIPT_FOOTER = "Thank You!";
-const RECEIPT_COPIES = ["GUARD COPY", "DRIVER COPY"];
+const RECEIPT_COPIES = ["GUARD'S COPY", "DRIVER'S COPY"];
+
+function capitalizeFirstLetter(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+function normalizeControlNumber(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "---") {
+    return raw;
+  }
+
+  const withNormalizedDashes = raw.replace(/[‐‑‒–—−﹣－]/g, "-");
+  const replaced = withNormalizedDashes.replace(/[^A-Za-z0-9-]/g, "-");
+  return replaced.replace(/-+/g, "-");
+}
 
 function fitText(text, width = RECEIPT_CHARS) {
   const value = String(text);
@@ -101,8 +121,8 @@ function buildReceiptCopyText(data, copyLabel) {
   const divider = "-".repeat(RECEIPT_CHARS);
   const amountText = Number(data.amount).toFixed(2);
   const { date, time } = formatTimestamp(data.timestamp);
-  const vehicleType = String(data.vehicleType || "").toLowerCase();
-  const controlNum = String(data.controlNumber).replace("-", "\xB7");
+  const vehicleType = capitalizeFirstLetter(String(data.vehicleType || ""));
+  const controlNum = normalizeControlNumber(data.controlNumber);
 
   return [
     center(resolveReceiptTitle(data.receiptHeader)),
